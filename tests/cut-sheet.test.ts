@@ -24,7 +24,7 @@ describe('sawCuts: the cut table of a Board', () => {
     expect(sawCuts(handPlan, sheet, board, nameOf)).toEqual([
       { label: '1', kind: 'rip', fence: mm(600), from: 'Front edge (after trim)', gives: 'Strip 1 · 600 wide' },
       { label: '1a', kind: 'cross', fence: mm(1000), from: 'Left end (after trim)', gives: 'W18-1-A · 1000 × 600' },
-      { label: '1b', kind: 'cross', fence: mm(700), from: 'Cut 1a', gives: 'SAW · B1 · Back · 700 × 600' },
+      { label: '1b', kind: 'cross', fence: mm(1700), from: 'Cut 1a', gives: 'SAW · B1 · Back · 1700 × 600' },
       { label: '2', kind: 'rip', fence: mm(400), from: 'Cut 1', gives: 'Strip 2 · 400 wide' },
       { label: '2a', kind: 'cross', fence: mm(1300), from: 'Left end (after trim)', gives: 'W18-1-B · 1300 × 400' },
     ]);
@@ -92,7 +92,7 @@ function describe_(page: Page): string {
     .map((it) => {
       switch (it.kind) {
         case 'text':
-          return `text ${r(it.x)},${r(it.y)} ${r(it.size)}${it.bold ? ' bold' : ''}${it.align ? ` ${it.align}` : ''}${it.colour ? ` ${it.colour}` : ''} ${JSON.stringify(it.text)}`;
+          return `text ${r(it.x)},${r(it.y)} ${r(it.size)}${it.bold ? ' bold' : ''}${it.align ? ` ${it.align}` : ''}${it.colour ? ` ${it.colour}` : ''}${it.vertical ? ' vertical' : ''} ${JSON.stringify(it.text)}`;
         case 'box':
           return `box ${r(it.x)},${r(it.y)} ${r(it.width)}x${r(it.height)}${it.fill ? ` fill ${it.fill}` : ''}${it.stroke ? ` stroke ${it.stroke} ${r(it.lineWidth ?? 0)}` : ''}${it.dash ? ' dashed' : ''}`;
         case 'line':
@@ -139,7 +139,7 @@ describe('cutSheet: cover and saw pages', () => {
     expect(t).toEqual(expect.arrayContaining(['White ABS 1 × 23', '6', '2.6 m']));
     // Layers: Side A outlines and ops, the Side B cup; reference layers last.
     expect(t).toEqual(
-      expect.arrayContaining(['OUTLINE_THRU', 'DRILL_D5_Z12', 'GROOVE_W8_Z8', 'DRILL_D35_Z13', 'REF_V1 · REF_BLANK · REF_CLAMP · REF_PART']),
+      expect.arrayContaining(['OUTLINE_THRU', 'DRILL_D5_Z12', 'GROOVE_W8_Z8', 'DRILL_D35_Z13', 'Reference layers, never cut: REF_V1 · REF_BLANK · REF_CLAMP · REF_PART']),
     );
     await expect(describe_(pages[0] as Page)).toMatchFileSnapshot('golden/cut-sheet-cover.txt');
   });
@@ -148,9 +148,11 @@ describe('cutSheet: cover and saw pages', () => {
     const t = texts(pages[1]);
     expect(t).toEqual(expect.arrayContaining(['W18-1-A', 'W18-1-B', 'SAW · B1 · Back', '1', '1a', '1b', '2', '2a']));
     // Cut table rows.
-    expect(t).toEqual(expect.arrayContaining(['Rip', 'Cross', '600', '1000', '700', '400', '1300', 'Cut 1a', 'Strip 1 · 600 wide']));
+    expect(t).toEqual(expect.arrayContaining(['Rip', 'Cross', '600', '1000', '1700', '400', '1300', 'Cut 1a', 'Strip 1 · 600 wide']));
     expect(t).toContain('Settings are to the near side of the blade · kerf 3.2 · trim 5');
+    // Waste is hatched and sized; the kept Offcuts are marked Keep.
     expect(pages[1]?.items.some((it) => it.kind === 'hatch')).toBe(true);
+    expect(t).toEqual(expect.arrayContaining(['Waste 83.6 × 600', 'Keep', '1486.8 × 400']));
     await expect(describe_(pages[1] as Page)).toMatchFileSnapshot('golden/cut-sheet-saw-W18-1.txt');
   });
 

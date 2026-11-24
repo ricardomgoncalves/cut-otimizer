@@ -121,7 +121,6 @@ function buildModel(file: PartsExport): ImportResult {
       cutLength: p.cutLength,
       cutWidth: p.cutWidth,
       grain: p.grain,
-      edges: { ...p.edges },
       top,
       bottom,
       manualOps,

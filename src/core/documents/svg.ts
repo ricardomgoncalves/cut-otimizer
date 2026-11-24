@@ -20,7 +20,8 @@ function item(it: Item): string {
     case 'text': {
       const anchor = it.align && it.align !== 'start' ? ` text-anchor="${it.align}"` : '';
       const weight = it.bold ? ' font-weight="bold"' : '';
-      return `<text x="${n(it.x)}" y="${n(it.y)}" font-size="${n(it.size)}"${anchor}${weight} fill="${it.colour ?? BLACK}">${escape(it.text)}</text>`;
+      const turn = it.vertical ? ` transform="rotate(-90 ${n(it.x)} ${n(it.y)})"` : '';
+      return `<text x="${n(it.x)}" y="${n(it.y)}" font-size="${n(it.size)}"${anchor}${weight}${turn} fill="${it.colour ?? BLACK}">${escape(it.text)}</text>`;
     }
     case 'line':
       return `<line x1="${n(it.x1)}" y1="${n(it.y1)}" x2="${n(it.x2)}" y2="${n(it.y2)}" stroke="${it.colour ?? BLACK}" stroke-width="${n(it.lineWidth)}"${dash(it.dash)}/>`;

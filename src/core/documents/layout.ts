@@ -18,6 +18,7 @@ export interface TextOptions {
   colour?: string;
   /** Cut short with `…` to this width (mm). */
   max?: number;
+  vertical?: boolean;
 }
 
 /** A text item: printable characters only, cut short to `max` when given. */
@@ -32,6 +33,7 @@ export function text(x: number, y: number, s: string, size: number, o: TextOptio
     ...(o.bold ? { bold: true } : {}),
     ...(o.align && o.align !== 'start' ? { align: o.align } : {}),
     ...(o.colour ? { colour: o.colour } : {}),
+    ...(o.vertical ? { vertical: true } : {}),
   };
 }
 
@@ -78,8 +80,8 @@ export class Flow {
   }
 
   heading(s: string): void {
-    this.ensure(12);
-    this.y += 4.5;
+    this.ensure(14);
+    this.y += 7;
     this.add(text(MARGIN, this.y, s, FONT.h3, { bold: true }));
     this.y += 2;
   }

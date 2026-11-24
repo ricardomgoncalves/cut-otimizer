@@ -36,6 +36,8 @@ export interface TextItem {
   /** Where `x` is on the text. Default `start`. */
   align?: 'start' | 'middle' | 'end';
   colour?: string;
+  /** Turned 90° counter-clockwise about (x, y): reads bottom to top. */
+  vertical?: boolean;
 }
 
 export interface LineItem {

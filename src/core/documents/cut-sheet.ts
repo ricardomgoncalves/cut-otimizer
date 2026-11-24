@@ -23,6 +23,7 @@ import {
 } from './layout.ts';
 import { A4, BLACK, type Item, type Page } from './page.ts';
 import { sawCuts } from './saw.ts';
+import { textWidth as textWidthOf } from './text.ts';
 
 /** What the cut sheet needs besides the Plan. */
 export interface CutSheetJob {
@@ -220,9 +221,9 @@ function coverPages(plan: Plan, job: CutSheetJob, sawFrom: number, sawCount: num
         mmText(u.thickness),
         toolpath(u, plan.settings.bitDiameter),
       ]),
-      [{ text: referenceLayers(plan).join(' · '), colour: GREY }, '', '', { text: 'Reference only, never cut', colour: GREY }],
     ],
   );
+  flow.paragraph(`Reference layers, never cut: ${referenceLayers(plan).join(' · ')}`, { size: FONT.small, colour: GREY });
   return flow.pages;
 }
 
@@ -422,13 +423,18 @@ function breakdownDrawing(
   }
 
   // Cuts, numbered in saw order: rips labelled left of the Board, crosscuts on their line.
+  // Rip labels closer than a label's height step further left so they don't cover each other.
+  let lastRip: { y: number; step: number } | null = null;
   for (const c of board.cuts) {
     if (c.kind === 'rip') {
       items.push({ kind: 'line', x1: X(c.x), y1: Y(c.y), x2: X(c.x + c.length), y2: Y(c.y), lineWidth: 0.35, dash: [2, 1] });
-      items.push(...cutLabel(DRAWING_LEFT - 4.5, Y(c.y), c.label));
+      const step: number = lastRip && Math.abs(lastRip.y - Y(c.y)) < 4.2 ? (lastRip.step + 1) % 2 : 0;
+      items.push(...cutLabel(DRAWING_LEFT - 4.5 - step * 5, Y(c.y), c.label));
+      lastRip = { y: Y(c.y), step };
     } else {
       items.push({ kind: 'line', x1: X(c.x), y1: Y(c.y), x2: X(c.x), y2: Y(c.y + c.length), lineWidth: 0.35, dash: [2, 1] });
-      items.push(...cutLabel(X(c.x), Y(c.y + c.length / 2), c.label));
+      // Near the strip's far edge, clear of the piece names in the middle.
+      items.push(...cutLabel(X(c.x), Math.min(Y(c.y + c.length) + 2.6, Y(c.y + c.length / 2)), c.label));
     }
   }
 
@@ -460,7 +466,31 @@ function pieceLabel(
   onHatch = false,
 ): Item[] {
   const room = r.width - 2;
-  if (room < 4 || r.height < 2.5) return [];
+  if (room >= 4 && r.height >= 1.6 && r.height < 4.5) {
+    // A thin strip: name and size on one small line.
+    const line = title === '' ? size : `${title} · ${size}`;
+    const fs = fitSize(line, room, Math.min(2.4, r.height * 0.8), 1.2, title !== '');
+    const y = r.y + r.height / 2 + fs * 0.35;
+    const label = text(r.x + r.width / 2, y, line, fs, { bold: title !== '', align: 'middle', colour, max: room });
+    const w = label.kind === 'text' ? textWidthOf(label.text, fs, title !== '') + 1 : 0;
+    return [
+      ...(onHatch ? [{ kind: 'box' as const, x: r.x + r.width / 2 - w / 2, y: y - fs, width: w, height: fs * 1.35, fill: WHITE }] : []),
+      label,
+    ];
+  }
+  if (room < 4 || r.height < 2.5) {
+    // Too narrow to read across: the size alone, reading up the piece.
+    if (r.width < 2 || r.height < 6) return [];
+    const fs = Math.min(2.4, r.width * 0.6);
+    const vx = r.x + r.width / 2 + fs * 0.35;
+    const vy = r.y + r.height / 2;
+    const label = text(vx, vy, size, fs, { align: 'middle', colour, max: r.height - 2, vertical: true });
+    const w = label.kind === 'text' ? Math.min(r.height - 2, textWidthOf(label.text, fs) + 1) : 0;
+    return [
+      ...(onHatch ? [{ kind: 'box' as const, x: r.x + r.width / 2 - fs * 0.7, y: vy - w / 2, width: fs * 1.4, height: w, fill: WHITE }] : []),
+      label,
+    ];
+  }
   const cx = r.x + r.width / 2;
   const cy = r.y + r.height / 2;
   const titleSize = title === '' ? 0 : fitSize(title, room, Math.min(3.6, r.height * 0.4), 1.6, true);
@@ -473,7 +503,7 @@ function pieceLabel(
   if (title === '' || both) {
     const y = title === '' ? cy + sizeSize * 0.35 : cy + sizeSize + 0.3;
     if (onHatch) {
-      const w = Math.min(room, sizeSize * 0.55 * size.length + 1);
+      const w = Math.min(room, textWidthOf(size, sizeSize) + 1);
       items.push({ kind: 'box', x: cx - w / 2, y: y - sizeSize, width: w, height: sizeSize * 1.35, fill: WHITE });
     }
     items.push(text(cx, y, size, sizeSize, { align: 'middle', colour, max: room }));

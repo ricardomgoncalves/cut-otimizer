@@ -1,12 +1,11 @@
 // PDF renderer for the page model (pdf-lib, standard Helvetica fonts, nothing embedded but the fonts' names).
-import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage, type RGB } from 'pdf-lib';
-import { hatchLines, qrSquares, type Item, type Page } from '../core/documents/index.ts';
+import { degrees, PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage, type RGB } from 'pdf-lib';
+import { BLACK, hatchLines, qrSquares, type Item, type Page } from '../core/documents/index.ts';
 
 /** Points per mm. */
 const K = 72 / 25.4;
 
-function colour(hex: string | undefined): RGB | undefined {
-  if (!hex) return undefined;
+function colour(hex: string): RGB {
   const v = Number.parseInt(hex.slice(1), 16);
   return rgb(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255);
 }
@@ -58,7 +57,12 @@ function drawItem(p: PDFPage, height: number, it: Item, font: PDFFont): void {
       const size = it.size * K;
       const width = font.widthOfTextAtSize(text, size);
       const shift = it.align === 'middle' ? width / 2 : it.align === 'end' ? width : 0;
-      p.drawText(text, { x: X(it.x) - shift, y: Y(it.y), size, font, color: colour(it.colour ?? '#000000') });
+      const color = colour(it.colour ?? BLACK);
+      if (it.vertical) {
+        p.drawText(text, { x: X(it.x), y: Y(it.y) - shift, size, font, color, rotate: degrees(90) });
+      } else {
+        p.drawText(text, { x: X(it.x) - shift, y: Y(it.y), size, font, color });
+      }
       return;
     }
     case 'line':
@@ -66,7 +70,7 @@ function drawItem(p: PDFPage, height: number, it: Item, font: PDFFont): void {
         start: { x: X(it.x1), y: Y(it.y1) },
         end: { x: X(it.x2), y: Y(it.y2) },
         thickness: it.lineWidth * K,
-        color: colour(it.colour ?? '#000000'),
+        color: colour(it.colour ?? BLACK),
         ...(it.dash ? { dashArray: it.dash.map((d) => d * K) } : {}),
       });
       return;

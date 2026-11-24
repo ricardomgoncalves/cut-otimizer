@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:types": "bun scripts/gen-types.ts",
+    "gen:fonts": "bun scripts/gen-font-metrics.ts",
     "e2e": "playwright test",
     "check": "bun run typecheck && bun run lint && bun run test && bun run build && bun run e2e"
   },

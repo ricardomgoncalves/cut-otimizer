@@ -60,8 +60,6 @@ export interface Part {
   cutWidth: number;
   /** `length`: the Part's X must follow the Board length. `none`: may rotate. */
   grain: 'length' | 'none';
-  /** Banded edges of the cut piece -> Edgeband id (`x0`/`xL` run along Y, `y0`/`yW` along X). Missing = unbanded. */
-  edges: Partial<Record<PartEdge, string>>;
   /** `top`-face ops, moved from the finished frame into the cut frame. */
   top: CncOp[];
   /**
@@ -84,8 +82,8 @@ export interface PartEdges {
   yW?: string;
 }
 
-/** An edge of a Part: `x0`/`xL` at the ends of its X, `y0`/`yW` at the ends of its Y. */
-export type PartEdge = 'x0' | 'xL' | 'y0' | 'yW';
+/** An edge of a Part: `x0`/`xL` at the ends of its X (they run along Y), `y0`/`yW` along X. */
+export type PartEdge = keyof PartEdges;
 
 /** An Edgeband from the export's library. */
 export interface Edgeband {

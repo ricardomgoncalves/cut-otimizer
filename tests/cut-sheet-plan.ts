@@ -1,7 +1,7 @@
 // A hand-written Model and Plan for the cut-sheet tests. Lengths in µm (written as mm through `mm`).
 //
 // W18 Board 1 (2800 × 2070, edge trim 5, kerf 3.2), front edge at y 5:
-//   strip 1, y 5..605:       Blank W18-1-A x 5..1005 | kerf | Saw Part "B1 · Back" x 1008.2..1708.2 | waste
+//   strip 1, y 5..605:       Blank W18-1-A x 5..1005 | kerf | Saw Part "B1 · Back" x 1008.2..2708.2 | waste 83.6
 //   strip 2, y 608.2..1008.2: Blank W18-1-B x 5..1305 | kerf | kept Offcut
 //   behind strip 2: kept Offcut y 1011.4..2065
 // O16 Board 1 (2440 × 1220, no trim): one strip, Blank O16-1-A 700 × 300, the rest is waste.
@@ -60,7 +60,7 @@ export const handModel: Model = {
       bottom: [{ kind: 'drill', at: { x: mm(100), y: mm(22.5) }, diameter: mm(35), depth: mm(13) }],
       manualOps: [{ reason: 'edge', face: 'x0', text: 'Drill Ø8 × 30 deep on x0 at y 100, z 9' }],
     }),
-    part({ id: 'c1/back', displayName: 'B1 · Back', sheetId: 's1', cutLength: mm(700), cutWidth: mm(600) }),
+    part({ id: 'c1/back', displayName: 'B1 · Back', sheetId: 's1', cutLength: mm(1700), cutWidth: mm(600) }),
     part({
       id: 'c1/shelf',
       displayName: 'B1 · Shelf',
@@ -157,21 +157,21 @@ export const handPlan: Plan = {
               partId: 'c1/back',
               x: mm(1008.2),
               y: mm(5),
-              length: mm(700),
+              length: mm(1700),
               width: mm(600),
               rotated: false,
               reason: 'chosen',
             },
           ],
           offcuts: [
-            { x: mm(1711.4), y: mm(5), length: mm(1083.6), width: mm(600), kept: true },
+            { x: mm(2711.4), y: mm(5), length: mm(83.6), width: mm(600), kept: false },
             { x: mm(1308.2), y: mm(608.2), length: mm(1486.8), width: mm(400), kept: true },
             { x: mm(5), y: mm(1011.4), length: mm(2790), width: mm(1053.6), kept: true },
           ],
           cuts: [
             { label: '1', kind: 'rip', x: mm(5), y: mm(605), length: mm(2790) },
             { label: '1a', kind: 'cross', x: mm(1005), y: mm(5), length: mm(600) },
-            { label: '1b', kind: 'cross', x: mm(1708.2), y: mm(5), length: mm(600) },
+            { label: '1b', kind: 'cross', x: mm(2708.2), y: mm(5), length: mm(600) },
             { label: '2', kind: 'rip', x: mm(5), y: mm(1008.2), length: mm(2790) },
             { label: '2a', kind: 'cross', x: mm(1305), y: mm(608.2), length: mm(400) },
           ],
