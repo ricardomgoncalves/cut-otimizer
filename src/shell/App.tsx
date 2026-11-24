@@ -43,6 +43,7 @@ import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
 import { CutSheetPanel } from './CutSheetPanel.tsx';
+import { LabelsPanel } from './LabelsPanel.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
 import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
@@ -556,6 +557,10 @@ export function App() {
                 i.kind === 'skipped' ? [{ label: i.label, name: i.name, reason: i.reason }] : [],
               ),
             }}
+          />
+          <LabelsPanel
+            plan={job.plan}
+            job={{ name: open?.doc.name ?? job.model.projectName, shortId: open?.doc.shortId ?? '', model: job.model }}
           />
           {rolled && <ProgressPanel rollup={rolled} owners={job.model.owners} />}
           <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
