@@ -221,13 +221,9 @@ export function needsNesting(d: Diff): string[] {
   );
 }
 
-/** A Part id as it is now: an old id (on a printed sticker, say) resolves through the id alias. */
-export function resolvePartId(aliases: Readonly<Record<string, string>>, id: string): string {
-  return aliases[id] ?? id;
-}
-
 /**
- * The id alias after a re-import: every old id maps straight to the current one. Earlier aliases follow
+ * The id alias (`JobDocument.idAliases`, resolved by progress.ts `resolveAlias`) after a re-import: every
+ * old id maps straight to the current one. Earlier aliases follow
  * the new renames, and an id that is live again stops being an alias.
  */
 export function extendAliases(
@@ -281,7 +277,7 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
     progress: renameKeys(doc.progress, renames),
     plan: doc.plan && renamePlanParts(doc.plan, renames),
     stale: doc.plan ? { needsNesting: [...carried.filter((id) => !nesting.includes(id)), ...nesting] } : null,
-    aliases: extendAliases(doc.aliases, renames),
+    idAliases: extendAliases(doc.idAliases, renames),
     reimportLog: [
       ...doc.reimportLog,
       {

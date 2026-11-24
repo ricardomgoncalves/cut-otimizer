@@ -43,6 +43,7 @@ import { applyReimport, diff, revertReimport, type Unpair } from '../core/reimpo
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
+import { CutSheetPanel } from './CutSheetPanel.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
 import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
@@ -50,6 +51,7 @@ import { JobList } from './JobList.tsx';
 import { PartDetail } from './PartDetail.tsx';
 import { ReimportDiff, ReimportLog } from './ReimportDiff.tsx';
 import { ProgressPanel } from './ProgressPanel.tsx';
+import { ScanMode } from './ScanMode.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
 import { ManualOpsList, SideBView } from './SideBView.tsx';
@@ -107,7 +109,7 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [storeError, setStoreError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [view, setView] = useState<'job' | 'settings'>('job');
+  const [view, setView] = useState<'job' | 'settings' | 'scan'>('job');
   const [codeError, setCodeError] = useState<string | null>(null);
   /** An untick waiting for confirmation because it would unlock these Board and Blank ids. */
   const [pendingUntick, setPendingUntick] = useState<{ partId: string; step: Step; unlocks: string[] } | null>(null);
@@ -345,13 +347,13 @@ export function App() {
 
   function onRegenerate() {
     if (!open?.job) return;
-    const job = regenerate(open.job, settings);
+    const job = regenerate(open.job, settings, open.doc.progress);
     save(withJob(open.doc, job, now()), open.model, job);
   }
 
   function onSheetCode(sheetId: string, code: string) {
     if (!open?.job) return;
-    const result = setSheetCode(open.job, sheetId, code);
+    const result = setSheetCode(open.job, sheetId, code, open.doc.progress);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -362,7 +364,7 @@ export function App() {
 
   function onPartMode(partId: string, mode: PartMode) {
     if (!open?.job) return;
-    const result = setPartMode(open.job, partId, mode);
+    const result = setPartMode(open.job, partId, mode, open.doc.progress);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -444,6 +446,15 @@ export function App() {
           }}
         >
           Machine settings
+        </button>{' '}
+        <button
+          type="button"
+          aria-pressed={view === 'scan'}
+          onClick={() => {
+            setView('scan');
+          }}
+        >
+          Scan mode
         </button>
       </nav>
     </>
@@ -454,6 +465,28 @@ export function App() {
       <main>
         {header}
         <SettingsScreen settings={settings} sheets={open?.model.sheets ?? []} onSave={onSaveSettings} />
+      </main>
+    );
+  }
+
+  if (view === 'scan') {
+    return (
+      <main>
+        {header}
+        {open && job ? (
+          <ScanMode
+            job={job}
+            progress={progress}
+            shortId={open.doc.shortId}
+            aliases={open.doc.idAliases}
+            whereOf={(id) => whereById.get(id)}
+            onTicked={(next) => {
+              save(withProgress(open.doc, next, now()), open.model, job);
+            }}
+          />
+        ) : (
+          <p>Open a planned Job to scan its labels.</p>
+        )}
       </main>
     );
   }
@@ -581,6 +614,8 @@ export function App() {
                 This Job was generated with different Machine settings (
                 {changed.map((k) => SETTING_LABELS[k]).join(', ')}). Its files keep the old settings until
                 you regenerate it.
+                {rolled?.boards.some((b) => b.locked) &&
+                  ' Locked Boards and Blanks (with a Part ticked Cut) stay exactly as they are; only the rest is planned again.'}
               </p>
               <button type="button" onClick={onRegenerate}>
                 Regenerate
@@ -618,6 +653,17 @@ export function App() {
               </button>
             </div>
           )}
+          <CutSheetPanel
+            plan={job.plan}
+            job={{
+              name: open?.doc.name ?? job.model.projectName,
+              shortId: open?.doc.shortId ?? '',
+              model: job.model,
+              skipped: issues.flatMap((i) =>
+                i.kind === 'skipped' ? [{ label: i.label, name: i.name, reason: i.reason }] : [],
+              ),
+            }}
+          />
           {rolled && <ProgressPanel rollup={rolled} owners={job.model.owners} />}
           <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
           {job.plan.sheets.map((sheet) => (
@@ -678,10 +724,11 @@ export function App() {
                         {blankRoll.get(blank.id)?.cut ?? 0} / {blank.parts.length} Cut ·{' '}
                         {blankRoll.get(blank.id)?.done ?? 0} / {blank.parts.length} Done
                       </span>
+                      {blankRoll.get(blank.id)?.locked && <span className="locked"> · Locked</span>}
                     </figcaption>
                     <BlankLayout
                       blank={blank}
-                      clampMargin={job.plan.settings.clampMargin}
+                      clampMargin={blank.clampMargin ?? job.plan.settings.clampMargin}
                       nameOf={nameOf}
                       sideBOf={sideBOf}
                     />

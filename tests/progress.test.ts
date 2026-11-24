@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
 import { generateJob, type Job } from '../src/core/job.ts';
-import { apply, isDone, rollup, steps, wouldUnlock, type Progress } from '../src/core/progress.ts';
+import { apply, isDone, reprintSelection, rollup, steps, wouldUnlock, type Progress } from '../src/core/progress.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 
 // The synthetic fixture, planned with default settings:
@@ -168,5 +168,21 @@ describe('Unticking Cut', () => {
     expect(wouldUnlock(job, sideA, DOOR, 'cut')).toEqual([]);
     expect(wouldUnlock(job, tickAll({}, DOOR), DOOR, 'banded')).toEqual([]);
     expect(wouldUnlock(job, {}, DOOR, 'cut')).toEqual([]);
+  });
+});
+
+describe('Reprints after a regenerate', () => {
+  it('select everything while nothing is cut', () => {
+    expect(reprintSelection(job, {})).toEqual({
+      boards: ['W18-1', 'O16-1'],
+      blanks: ['W18-1-A', 'O16-1-A'],
+      parts: [DOOR, SHELF, LEFT, RAIL, TOE],
+      sideB: ['B1'],
+    });
+  });
+
+  it('leave out Locked Boards and Blanks, the Parts on them and Done Parts, in Run order', () => {
+    const railCut = apply(job, {}, { kind: 'tick', partId: RAIL, step: 'cut', at: T1 });
+    expect(reprintSelection(job, railCut)).toEqual({ boards: ['O16-1'], blanks: ['O16-1-A'], parts: [TOE], sideB: [] });
   });
 });

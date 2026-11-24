@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { PartsExport } from '../src/core/import/parts-export.v1.generated.ts';
 import { importExport } from '../src/core/import/index.ts';
-import { applyReimport, diff, resolvePartId, revertReimport } from '../src/core/reimport.ts';
+import { applyReimport, diff, revertReimport } from '../src/core/reimport.ts';
 import { generateJob, regenerate, sheetCode, type Job } from '../src/core/job.ts';
 import {
   createJobDocument,
@@ -13,7 +13,7 @@ import {
   withProgress,
   type JobDocument,
 } from '../src/core/job-store/document.ts';
-import { apply, steps } from '../src/core/progress.ts';
+import { apply, resolveAlias, steps } from '../src/core/progress.ts';
 import type { Model } from '../src/core/model.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 
@@ -328,13 +328,13 @@ describe('Applying a re-import', () => {
   it("moves a Part's ticks to its new id, and the old id still resolves through the alias", () => {
     const after = reimport(tickedDocument(TOE), renamedToeKick());
     expect(after.progress).toEqual({ [NEW_TOE]: { cut: TICK } });
-    expect(after.aliases).toEqual({ [TOE]: NEW_TOE });
-    expect(resolvePartId(after.aliases, TOE)).toBe(NEW_TOE);
-    expect(resolvePartId(after.aliases, SHELF)).toBe(SHELF);
+    expect(after.idAliases).toEqual({ [TOE]: NEW_TOE });
+    expect(resolveAlias(after.idAliases, TOE)).toBe(NEW_TOE);
+    expect(resolveAlias(after.idAliases, SHELF)).toBe(SHELF);
 
     const reopened = openJobDocument(after);
     if ('error' in reopened || !reopened.job) throw new Error('must open');
-    expect(steps(reopened.job, resolvePartId(after.aliases, TOE))).toEqual(['cut']);
+    expect(steps(reopened.job, resolveAlias(after.idAliases, TOE))).toEqual(['cut']);
   });
 
   it('keeps the id alias permanently, following later renames', () => {
@@ -352,10 +352,10 @@ describe('Applying a re-import', () => {
         part(f, LAST).owner.id = 'w1.left.lower.c5/toeKick';
       }),
     );
-    expect(twice.aliases).toEqual({ [TOE]: LAST, [NEW_TOE]: LAST });
+    expect(twice.idAliases).toEqual({ [TOE]: LAST, [NEW_TOE]: LAST });
     // Renamed back: the first id is live again, so it is no longer an alias.
     const back = reimport(twice, exportWith());
-    expect(back.aliases).toEqual({ [NEW_TOE]: TOE, [LAST]: TOE });
+    expect(back.idAliases).toEqual({ [NEW_TOE]: TOE, [LAST]: TOE });
   });
 
   it('logs the date, the export date and the counts per category', () => {
@@ -439,10 +439,10 @@ describe('The re-imported Job document', () => {
   });
 
   it('opens files saved before re-import existed', () => {
-    const fields = new Set(['aliases', 'reimportLog', 'stale', 'previous']);
+    const fields = new Set(['idAliases', 'reimportLog', 'stale', 'previous']);
     const old = Object.fromEntries(Object.entries(plannedDocument()).filter(([key]) => !fields.has(key)));
     const read = fromJobFile(JSON.stringify(old));
-    expect(read).toMatchObject({ doc: { aliases: {}, reimportLog: [], stale: null, previous: null } });
+    expect(read).toMatchObject({ doc: { idAliases: {}, reimportLog: [], stale: null, previous: null } });
   });
 });
 

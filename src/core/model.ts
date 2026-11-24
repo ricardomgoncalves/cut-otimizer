@@ -82,6 +82,17 @@ export interface PartEdges {
   yW?: string;
 }
 
+/** An edge of a Part: `x0`/`xL` at the ends of its X (they run along Y), `y0`/`yW` along X. */
+export type PartEdge = keyof PartEdges;
+
+/** An Edgeband from the export's library. */
+export interface Edgeband {
+  id: string;
+  name: string;
+  thickness: number;
+  width: number;
+}
+
 /** A Part face, as the export names it. */
 export type Face = ExportOp['face'];
 
@@ -110,6 +121,8 @@ export interface Model {
   exportedAt?: string;
   /** In export order (by id, shortest first). */
   sheets: Sheet[];
+  /** In export order. */
+  edgebands: Edgeband[];
   /** Cabinets, then Generated Items, in export order. */
   owners: Owner[];
   /** In export order. */

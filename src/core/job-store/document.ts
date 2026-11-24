@@ -1,14 +1,14 @@
 // The Job document: one versioned record per Job, stored in IndexedDB and saved as `.job.json`.
 // It keeps the raw export verbatim (the model is rebuilt from it by Import), the settings snapshot,
 // Sheet codes, the Plan and the Saw/CNC overrides, progress, the id alias table, the re-import log, the
-// stale flag and the document before the last re-import. Later slices add Offcuts and Spares as new fields; a breaking change bumps `jobFormat` and adds a
-// migration from the previous one.
+// stale flag and the document before the last re-import. Later slices add Offcuts and Spares as new
+// fields; a breaking change bumps `jobFormat` and adds a migration from the previous one.
 import { APP_NAME } from '../app.ts';
 import { importExport, type ImportIssue } from '../import/index.ts';
 import type { Job } from '../job.ts';
 import type { Model } from '../model.ts';
 import type { Plan } from '../planner/index.ts';
-import { STEPS, type PartTicks, type Progress } from '../progress.ts';
+import { STEPS, type IdAliases, type PartTicks, type Progress } from '../progress.ts';
 import type { Category } from '../reimport.ts';
 import { parseSettings, type Settings } from '../settings.ts';
 
@@ -46,11 +46,11 @@ export interface JobDocument {
    */
   progress: Progress;
   /**
-   * Old Part id -> current Part id, for every Part a re-import moved to a new id (reimport.ts). Permanent, so
-   * old stickers still scan: resolve with `resolvePartId`. `{}` in files saved before re-import existed.
+   * Old Export Part id -> new one, added by re-import and never removed, so old stickers still scan
+   * (progress.ts `resolveAlias`). Empty until a re-import adds entries; missing in older files.
    */
-  aliases: Record<string, string>;
-  /** One entry per applied re-import, oldest first. */
+  idAliases: IdAliases;
+  /** One entry per applied re-import, oldest first (reimport.ts). */
   reimportLog: ReimportLogEntry[];
   /**
    * Set by a re-import: the stored Plan predates the export ("Export updated, n Parts need nesting").
@@ -109,7 +109,7 @@ export function createJobDocument({ id, shortId, rawExport, fileName, model, set
     plan: null,
     sawCncOverrides: {},
     progress: {},
-    aliases: {},
+    idAliases: {},
     reimportLog: [],
     stale: null,
     previous: null,
@@ -269,7 +269,7 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
     plan: null,
     sawCncOverrides: strings('sawCncOverrides', (v): v is 'saw' | 'cnc' => v === 'saw' || v === 'cnc'),
     progress: {},
-    aliases: strings('aliases', (v): v is string => typeof v === 'string'),
+    idAliases: strings('idAliases', (v): v is string => typeof v === 'string'),
     reimportLog: [],
     stale: null,
     previous: null,
