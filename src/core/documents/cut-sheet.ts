@@ -4,6 +4,7 @@
 import { layerUsage, referenceLayers, type LayerUse } from '../dxf/index.ts';
 import type { Model, PartEdge } from '../model.ts';
 import type { Board, Plan, SheetPlan } from '../planner/index.ts';
+import { CATEGORIES, type Category } from '../reimport.ts';
 import { edgeTrimFor } from '../settings.ts';
 import { mmText, sizeText } from './format.ts';
 import {
@@ -114,6 +115,7 @@ function coverPages(plan: Plan, job: CutSheetJob, sawFrom: number, sawCount: num
   });
 
   // Before you start.
+  const spares = job.spares ?? [];
   const sawIds = plan.sheets.flatMap((s) => s.sawParts);
   const unplaced = plan.sheets.flatMap((s) => s.unplaced);
   const manualParts = new Set(plan.manualOps.map((m) => m.partId));
@@ -130,6 +132,9 @@ function coverPages(plan: Plan, job: CutSheetJob, sawFrom: number, sawCount: num
     job.skipped.length === 0
       ? 'Skipped items: none.'
       : `Skipped items: ${job.skipped.map((s) => `${s.label} · ${s.name} (${s.reason})`).join(', ')}. This Job is incomplete.`,
+    spares.length === 0
+      ? 'Spares: none.'
+      : `Spares: ${plural(spares.length, 'cut Part')} no longer in the export (${spares.map((s) => s.displayName).join(', ')}): set them aside. They count nowhere.`,
   ];
   flow.y += 3;
   const boxTop = flow.y;
@@ -222,7 +227,69 @@ function coverPages(plan: Plan, job: CutSheetJob, sawFrom: number, sawCount: num
     ],
   );
   flow.paragraph(`Reference layers, never cut: ${referenceLayers(plan).join(' · ')}`, { size: FONT.small, colour: GREY });
+
+  // Spares: cut Parts a re-import removed, to find and set aside.
+  if (spares.length > 0) {
+    flow.heading('Spares');
+    table(
+      flow,
+      MARGIN,
+      [
+        { header: 'Spare (old name)', width: 80 },
+        { header: 'Cut size', width: 40 },
+        { header: 'Was cut at', width: CONTENT_WIDTH - 120 },
+      ],
+      spares.map((s): Cell[] => [
+        { text: s.displayName, bold: true },
+        `${sizeText(s.cutLength, s.cutWidth)} × ${mmText(s.thickness)}`,
+        s.where ?? { text: '—', colour: GREY },
+      ]),
+    );
+  }
+
+  // Re-import log.
+  const log = job.reimportLog ?? [];
+  if (log.length > 0) {
+    flow.heading('Re-import log');
+    table(
+      flow,
+      MARGIN,
+      [
+        { header: 'Applied', width: 28 },
+        { header: 'Exported', width: 28 },
+        { header: 'File', width: 50 },
+        { header: 'Parts', width: CONTENT_WIDTH - 106 },
+      ],
+      log.map((entry): Cell[] => [
+        isoMinutes(entry.at),
+        entry.exportedAt === undefined ? { text: '—', colour: GREY } : isoMinutes(entry.exportedAt),
+        entry.fileName,
+        countsText(entry.counts),
+      ]),
+    );
+  }
   return flow.pages;
+}
+
+const CATEGORY_NAMES: Record<Category, string> = {
+  changedCut: 'Changed (cut)',
+  changedFinishing: 'Changed (finishing)',
+  added: 'Added',
+  removed: 'Removed',
+  renamed: 'Renamed',
+  same: 'Same',
+};
+
+/** `1 Changed (cut) · 2 Added · 3 Same`: the non-zero counts in diff order. */
+function countsText(counts: Readonly<Record<Category, number>>): string {
+  return CATEGORIES.filter((c) => counts[c] > 0)
+    .map((c) => `${String(counts[c])} ${CATEGORY_NAMES[c]}`)
+    .join(' · ');
+}
+
+/** An ISO time as `YYYY-MM-DD HH:MM`, as written (UTC for times the app stores). */
+function isoMinutes(iso: string): string {
+  return iso.slice(0, 16).replace('T', ' ');
 }
 
 function settingsTable(plan: Plan, job: CutSheetJob): Cell[][] {

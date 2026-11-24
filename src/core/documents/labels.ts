@@ -28,6 +28,11 @@ export interface LabelsJob {
   name: string;
   shortId: string;
   model: Model;
+  /**
+   * Only these Parts: "Print labels for this re-import" (the log entry's `labelIds`). In label order, then
+   * those not on a Board yet (reimportLabelOrder). Every Part of the Plan when left out.
+   */
+  partIds?: readonly string[];
 }
 
 /** Sticker spot rules, µm: how far from the Part's edges, and how much clearance around every op. */
@@ -211,13 +216,15 @@ export function reimportLabelOrder(plan: Plan, partIds: readonly string[]): Labe
 
 /** The label sheets: 14 labels a sheet in label order (labelOrder), filling each row left to right. */
 export function labels(plan: Plan, job: LabelsJob): Page[] {
-  const entries = labelOrder(plan).filter((e) => job.model.parts.some((p) => p.id === e.partId));
+  const order = job.partIds ? reimportLabelOrder(plan, job.partIds) : labelOrder(plan);
+  const entries = order.filter((e) => job.model.parts.some((p) => p.id === e.partId));
+  const title = job.partIds ? 'Labels for re-import' : 'Labels';
   const perSheet = SHEET.columns * SHEET.rows;
   const count = Math.max(1, Math.ceil(entries.length / perSheet));
   const pages: Page[] = [];
   for (let i = 0; i < count; i++) {
     const items: Item[] = [
-      text(SHEET.left, 9, `Labels · ${job.name} · Job ${job.shortId} · sheet ${String(i + 1)} of ${String(count)}`, 2.2, {
+      text(SHEET.left, 9, `${title} · ${job.name} · Job ${job.shortId} · sheet ${String(i + 1)} of ${String(count)}`, 2.2, {
         colour: GREY,
         max: A4.width - 2 * SHEET.left,
       }),

@@ -1,5 +1,6 @@
 // Shared pieces of the cut sheet's pages: the work-page header, the numbered sections (the cover's
 // "Order of work"), Part Run order and locations, and the cells every Part table repeats.
+import type { ReimportLogEntry, Spare } from '../job-store/document.ts';
 import type { Model, Part, PartEdge } from '../model.ts';
 import { isLive, livePartIds, type Blank, type Placement, type Plan, type SawPlacement, type SheetPlan } from '../planner/index.ts';
 import { steps, type Step } from '../progress.ts';
@@ -17,6 +18,10 @@ export interface CutSheetJob {
   model: Model;
   /** The export's Skipped items (the Job is incomplete when there are any). */
   skipped: { label: string; name: string; reason: string }[];
+  /** Cut Parts a re-import removed, not dismissed yet (cover only). */
+  spares?: readonly Spare[];
+  /** One entry per applied re-import, oldest first (cover only). */
+  reimportLog?: readonly ReimportLogEntry[];
 }
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;
