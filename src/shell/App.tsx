@@ -39,6 +39,7 @@ import {
   type ProgressEvent,
   type Step,
 } from '../core/progress.ts';
+import { applyReimport, diff, revertReimport, type Unpair } from '../core/reimport.ts';
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
@@ -48,7 +49,9 @@ import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
 import { JobList } from './JobList.tsx';
 import { PartDetail } from './PartDetail.tsx';
+import { ReimportDiff, ReimportLog } from './ReimportDiff.tsx';
 import { ProgressPanel } from './ProgressPanel.tsx';
+import { ScanMode } from './ScanMode.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
 import { ManualOpsList, SideBView } from './SideBView.tsx';
@@ -66,6 +69,14 @@ interface OpenJob {
   doc: JobDocument;
   model: Model;
   job: Job | null;
+}
+
+/** An updated export loaded into the open Job, under review in the diff screen. */
+interface PendingReimport {
+  fileName: string;
+  rawExport: string;
+  model: Model;
+  unpaired: Unpair[];
 }
 
 /** localStorage key of the Job to reopen after a reload. */
@@ -98,10 +109,11 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [storeError, setStoreError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [view, setView] = useState<'job' | 'settings'>('job');
+  const [view, setView] = useState<'job' | 'settings' | 'scan'>('job');
   const [codeError, setCodeError] = useState<string | null>(null);
   /** An untick waiting for confirmation because it would unlock these Board and Blank ids. */
   const [pendingUntick, setPendingUntick] = useState<{ partId: string; step: Step; unlocks: string[] } | null>(null);
+  const [reimport, setReimport] = useState<PendingReimport | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -150,6 +162,7 @@ export function App() {
 
   function resetMessages() {
     setPendingUntick(null);
+    setReimport(null);
     setIssues([]);
     setLoadError(null);
     setCodeError(null);
@@ -197,6 +210,57 @@ export function App() {
     if (!open) return;
     const job = generateJob(open.model, settings, open.doc.sheetCodes, open.doc.sawCncOverrides);
     save(withJob(open.doc, job, now()), open.model, job);
+  }
+
+  /** Loads an updated export into the open Job and shows the diff screen. Nothing changes until Apply. */
+  async function onReimportFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !open) return;
+    setReimport(null);
+    setLoadError(null);
+    const text = await file.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (err) {
+      setLoadError(`${file.name} is not JSON: ${errorText(err)}`);
+      return;
+    }
+    const result = importExport(json);
+    if (!result.model) {
+      setIssues(result.issues);
+      setLoadError(`${file.name} is not a valid Parts Export v1. The Job is unchanged.`);
+      return;
+    }
+    setReimport({ fileName: file.name, rawExport: text, model: result.model, unpaired: [] });
+  }
+
+  /** Applies the reviewed re-import, all or nothing, and reopens the Job from its new document. */
+  function onApplyReimport() {
+    if (!open || !reimport) return;
+    const reviewed = diff({ model: open.model, plan: open.doc.plan }, reimport.model, { unpaired: reimport.unpaired });
+    const doc = applyReimport(open.doc, open.model, reimport, reviewed, now());
+    setReimport(null);
+    reopen(doc);
+  }
+
+  function onRevertReimport() {
+    if (!open) return;
+    const doc = revertReimport(open.doc);
+    if (doc) reopen(doc);
+  }
+
+  /** Saves a document whose raw export changed, rebuilding its model and issues. */
+  function reopen(doc: JobDocument) {
+    const opened = openJobDocument(doc);
+    if ('error' in opened) {
+      setLoadError(opened.error);
+      return;
+    }
+    setPendingUntick(null);
+    setIssues(opened.issues);
+    save(doc, opened.model, opened.job);
   }
 
   /** Opens a Job document: shows it, and saves it when it came from a file. */
@@ -283,13 +347,13 @@ export function App() {
 
   function onRegenerate() {
     if (!open?.job) return;
-    const job = regenerate(open.job, settings);
+    const job = regenerate(open.job, settings, open.doc.progress);
     save(withJob(open.doc, job, now()), open.model, job);
   }
 
   function onSheetCode(sheetId: string, code: string) {
     if (!open?.job) return;
-    const result = setSheetCode(open.job, sheetId, code);
+    const result = setSheetCode(open.job, sheetId, code, open.doc.progress);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -300,7 +364,7 @@ export function App() {
 
   function onPartMode(partId: string, mode: PartMode) {
     if (!open?.job) return;
-    const result = setPartMode(open.job, partId, mode);
+    const result = setPartMode(open.job, partId, mode, open.doc.progress);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -382,6 +446,15 @@ export function App() {
           }}
         >
           Machine settings
+        </button>{' '}
+        <button
+          type="button"
+          aria-pressed={view === 'scan'}
+          onClick={() => {
+            setView('scan');
+          }}
+        >
+          Scan mode
         </button>
       </nav>
     </>
@@ -392,6 +465,28 @@ export function App() {
       <main>
         {header}
         <SettingsScreen settings={settings} sheets={open?.model.sheets ?? []} onSave={onSaveSettings} />
+      </main>
+    );
+  }
+
+  if (view === 'scan') {
+    return (
+      <main>
+        {header}
+        {open && job ? (
+          <ScanMode
+            job={job}
+            progress={progress}
+            shortId={open.doc.shortId}
+            aliases={open.doc.idAliases}
+            whereOf={(id) => whereById.get(id)}
+            onTicked={(next) => {
+              save(withProgress(open.doc, next, now()), open.model, job);
+            }}
+          />
+        ) : (
+          <p>Open a planned Job to scan its labels.</p>
+        )}
       </main>
     );
   }
@@ -461,20 +556,66 @@ export function App() {
             )}{' '}
             <button type="button" onClick={onDownloadJob}>
               Download Job
-            </button>
+            </button>{' '}
+            <label>
+              Re-import export…{' '}
+              <input type="file" accept=".json,application/json" onChange={(e) => void onReimportFile(e)} />
+            </label>{' '}
+            {open.doc.previous && (
+              <button type="button" onClick={onRevertReimport}>
+                Revert last re-import
+              </button>
+            )}
           </p>
+          {reimport && (
+            <ReimportDiff
+              fileName={reimport.fileName}
+              diff={diff({ model: open.model, plan: open.doc.plan }, reimport.model, { unpaired: reimport.unpaired })}
+              onUnpair={(entry) => {
+                if (entry.oldId === undefined || entry.newId === undefined) return;
+                const pair = { oldId: entry.oldId, newId: entry.newId };
+                setReimport({ ...reimport, unpaired: [...reimport.unpaired, pair] });
+              }}
+              onApply={onApplyReimport}
+              onCancel={() => {
+                setReimport(null);
+              }}
+            />
+          )}
+          <ReimportLog log={open.doc.reimportLog} />
           {!job && <ImportSummary model={open.model} issues={issues} />}
         </>
       )}
 
       {job && (
         <>
+          {open?.doc.stale && (
+            <div role="status" aria-label="Export updated" className="stale warning-box">
+              <p>
+                Export updated, {open.doc.stale.needsNesting.length}{' '}
+                {open.doc.stale.needsNesting.length === 1 ? 'Part needs' : 'Parts need'} nesting. The Layouts below
+                are from the previous export until you regenerate.
+              </p>
+              {open.doc.stale.needsNesting.length > 0 && (
+                <ul>
+                  {open.doc.stale.needsNesting.map((id) => (
+                    <li key={id}>{nameOf(id)}</li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" onClick={onRegenerate}>
+                Regenerate
+              </button>
+            </div>
+          )}
           {changed.length > 0 && (
             <div role="status" className="stale">
               <p>
                 This Job was generated with different Machine settings (
                 {changed.map((k) => SETTING_LABELS[k]).join(', ')}). Its files keep the old settings until
                 you regenerate it.
+                {rolled?.boards.some((b) => b.locked) &&
+                  ' Locked Boards and Blanks (with a Part ticked Cut) stay exactly as they are; only the rest is planned again.'}
               </p>
               <button type="button" onClick={onRegenerate}>
                 Regenerate
@@ -583,10 +724,11 @@ export function App() {
                         {blankRoll.get(blank.id)?.cut ?? 0} / {blank.parts.length} Cut ·{' '}
                         {blankRoll.get(blank.id)?.done ?? 0} / {blank.parts.length} Done
                       </span>
+                      {blankRoll.get(blank.id)?.locked && <span className="locked"> · Locked</span>}
                     </figcaption>
                     <BlankLayout
                       blank={blank}
-                      clampMargin={job.plan.settings.clampMargin}
+                      clampMargin={blank.clampMargin ?? job.plan.settings.clampMargin}
                       nameOf={nameOf}
                       sideBOf={sideBOf}
                     />
@@ -617,6 +759,7 @@ export function App() {
                 job={job}
                 sheet={sheet}
                 progress={progress}
+                needsNesting={open?.doc.stale?.needsNesting ?? []}
                 onMode={onPartMode}
                 onStep={onStep}
               />
@@ -720,6 +863,8 @@ function PartList(props: {
   job: Job;
   sheet: SheetPlan;
   progress: Progress;
+  /** After a re-import: Parts the stale Plan doesn't place as they are now. */
+  needsNesting: readonly string[];
   onMode: (partId: string, mode: PartMode) => void;
   onStep: (partId: string, step: Step, ticked: boolean) => void;
 }) {
@@ -767,7 +912,7 @@ function PartList(props: {
                   {p.cutLength / 1000} × {p.cutWidth / 1000}
                 </td>
                 <td>
-                  {at?.text}
+                  {props.needsNesting.includes(p.id) ? <span className="warn">needs nesting</span> : at?.text}
                   {at?.narrow && <span className="warn"> · narrow: check tabs</span>}
                 </td>
                 <td>

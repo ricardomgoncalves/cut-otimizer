@@ -100,6 +100,18 @@ describe('The Job document', () => {
     expect(fromJobFile(JSON.stringify(unknownStep))).toEqual({ error: expect.stringContaining('progress') });
   });
 
+  it('starts with an empty id alias table, keeps one through .job.json, and reads old files as empty', () => {
+    const doc = syntheticDocument();
+    expect(doc.idAliases).toEqual({});
+    const aliased = { ...doc, idAliases: { 'c1/oldRail': 'c1/s0.rail[1]' } };
+    expect(fromJobFile(toJobFile(aliased))).toEqual({ doc: aliased });
+    const file = JSON.parse(toJobFile(doc)) as Record<string, unknown>;
+    delete file['idAliases'];
+    const read = fromJobFile(JSON.stringify(file));
+    expect('doc' in read && read.doc.idAliases).toEqual({});
+    expect(fromJobFile(JSON.stringify({ ...file, idAliases: { a: 1 } }))).toEqual({ error: expect.stringContaining('idAliases') });
+  });
+
   it('downloads as <name>.job.json', () => {
     expect(jobFileName(syntheticDocument())).toBe('Synthetic fixture 2026-11-24.job.json');
   });
