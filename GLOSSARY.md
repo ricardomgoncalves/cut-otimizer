@@ -36,8 +36,12 @@ The saw plan that cuts each Board, by guillotine cuts, into Blanks, Saw Parts an
 _Avoid_: pre-cut plan, rip plan
 
 **Blank**:
-A piece cut from a Board, no larger than the bed, onto which Parts are nested. Always loaded with its Board's length along the bed's X. Identified as Sheet code, Board number, letter (`W18-1-A`).
+A piece cut from a Board, no larger than the bed, onto which Parts are nested. Always loaded with its Board's length along the bed's X. Identified as Sheet code, Board number, letter (`W18-1-A`), with letters given in the order pieces come off the saw.
 _Avoid_: sub-sheet, tile, offcut
+
+**Run order**:
+The single Job-wide sequence in which the work is done: all Boards are sawn, then all Blanks run Side A, then all Side B files, then banding. Sheets are grouped by thickness (groups and Sheets in export order), Boards and Blanks follow their ids, and Parts within a Blank are numbered by position. It is always computed, never edited, and the cut sheet and labels follow it.
+_Avoid_: work order, order of work, cut order
 
 **Sheet code**:
 A short code for a Sheet, derived from its material and thickness and editable (`W18` for White melamine 18). Used in Blank ids.
