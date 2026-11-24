@@ -3,10 +3,12 @@ import type { Blank } from '../core/planner/index.ts';
 interface Props {
   blank: Blank;
   clampMargin: number;
+  /** A Part's display name (`<Owner label> · <Part name>`) from its id. */
+  nameOf: (partId: string) => string;
 }
 
 /** A plain SVG of one Blank's Layout: front edge at the bottom, X to the right, in mm. */
-export function BlankLayout({ blank, clampMargin }: Props) {
+export function BlankLayout({ blank, clampMargin, nameOf }: Props) {
   const mm = (um: number) => um / 1000;
   const L = mm(blank.length);
   const W = mm(blank.width);
@@ -40,7 +42,7 @@ export function BlankLayout({ blank, clampMargin }: Props) {
         const y = flipY(mm(p.y), h);
         return (
           <g key={p.partId} className={p.narrow ? 'narrow' : undefined}>
-            <title>{`#${String(p.n)} ${p.partId}${p.narrow ? ' (narrow: check tabs)' : ''}`}</title>
+            <title>{`#${String(p.n)} ${nameOf(p.partId)}${p.narrow ? ' (narrow: check tabs)' : ''}`}</title>
             <rect
               x={x}
               y={y}

@@ -4,19 +4,35 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../../vendor/parts-export/parts-export.v1.schema.json';
 import type { CncOp, Model, Owner, Part, Point, Sheet } from '../model.ts';
 import { mmToken } from '../units.ts';
+import { fullPartName, nameParts } from './names.ts';
 import type {
   FacePoint,
   Op as ExportOp,
   Part as ExportPart,
   PartsExport,
   Sheet as ExportSheet,
+  Skipped,
 } from './parts-export.v1.generated.ts';
 
 export type ImportIssue =
   /** The file does not match the schema. Nothing is loaded. */
   | { kind: 'schema'; path: string; message: string }
   /** Loaded, but something is not handled yet or needs attention. */
-  | { kind: 'warning'; partId?: string; message: string };
+  | { kind: 'warning'; partId?: string; message: string }
+  /** Something cabinet-planner left out of the export: the Job is incomplete. */
+  | {
+      kind: 'skipped';
+      ownerKind: Skipped['kind'];
+      id: string;
+      label: string;
+      /** The Library Cabinet name or the Generated Item kind. */
+      name: string;
+      reason: Skipped['reason'];
+      /** Violation codes, for `invalid`. */
+      problems: string[];
+    }
+  /** A Part path key the derive table doesn't know: those Parts are named with spaces added. */
+  | { kind: 'unknownKey'; key: string; partIds: string[] };
 
 export interface ImportResult {
   /** `null` when the file fails schema validation. */
@@ -48,11 +64,21 @@ function buildModel(file: PartsExport): ImportResult {
 
   const sheets = sheetsWithCodes(file.materials.sheets);
   const owners: Owner[] = [
-    ...file.cabinets.map((c) => ({ kind: 'cabinet' as const, id: c.id, label: c.label })),
-    ...file.generatedItems.map((g) => ({ kind: 'generatedItem' as const, id: g.id, label: g.label })),
+    ...file.cabinets.map(
+      (c): Owner => ({ kind: 'cabinet', id: c.id, label: c.label, cabinetName: c.libraryCabinetName }),
+    ),
+    ...file.generatedItems.map(
+      (g): Owner => ({ kind: 'generatedItem', id: g.id, label: g.label, itemKind: g.kind }),
+    ),
   ];
+  const ownerLabel = new Map(owners.map((o) => [o.id, o.label]));
+  const naming = nameParts(
+    owners,
+    file.parts.map((p) => ({ id: p.id, name: p.name, ownerId: p.owner.id, ...exportLabel(p) })),
+  );
 
-  const parts = file.parts.map((p): Part => {
+  const parts = file.parts.map((p, i): Part => {
+    const partName = naming.parts[i]?.partName ?? p.name;
     const offset = {
       x: p.edges.x0 === undefined ? 0 : (bandThickness.get(p.edges.x0) ?? 0),
       y: p.edges.y0 === undefined ? 0 : (bandThickness.get(p.edges.y0) ?? 0),
@@ -69,6 +95,8 @@ function buildModel(file: PartsExport): ImportResult {
     return {
       id: p.id,
       name: p.name,
+      partName,
+      displayName: fullPartName(ownerLabel.get(p.owner.id) ?? p.owner.id, partName),
       ownerId: p.owner.id,
       sheetId: p.sheetId,
       thickness: p.thickness,
@@ -81,7 +109,30 @@ function buildModel(file: PartsExport): ImportResult {
     };
   });
 
+  issues.push(
+    ...naming.unknownKeys.map((u): ImportIssue => ({ kind: 'unknownKey', key: u.key, partIds: u.partIds })),
+    ...file.skipped.map(
+      (s): ImportIssue => ({
+        kind: 'skipped',
+        ownerKind: s.kind,
+        id: s.id,
+        label: s.label,
+        name: s.name,
+        reason: s.reason,
+        problems: s.problems,
+      }),
+    ),
+  );
   return { model: { projectName: file.project.name, sheets, owners, parts }, issues };
+}
+
+/**
+ * The optional Part `label` (the Library Part's Cut-list text) planned for a v1 minor release. A v1.0
+ * file can't carry it (the schema is strict); a newer minor is validated against its own schema.
+ */
+function exportLabel(p: ExportPart): { label?: string } {
+  const label: unknown = (p as ExportPart & { label?: unknown }).label;
+  return typeof label === 'string' && label !== '' ? { label } : {};
 }
 
 function partWarnings(p: ExportPart, bottom: number, edgeOps: number): ImportIssue[] {

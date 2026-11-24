@@ -1,12 +1,17 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const fixture = new URL('../fixtures/synthetic.parts.json', import.meta.url).pathname;
+
+async function loadAndPlan(page: Page) {
+  await page.goto('/');
+  await page.getByLabel('Load export').setInputFiles(fixture);
+  await page.getByRole('button', { name: 'Plan' }).click();
+}
 
 test('the Breakdown view shows each Board with numbered rips and crosscuts, Saw Parts and Offcuts', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByLabel('Load export').setInputFiles(fixture);
+  await loadAndPlan(page);
 
   const drawing = page.getByRole('img', { name: 'Breakdown of W18 Board 1' });
   await expect(drawing).toBeVisible();
@@ -22,24 +27,23 @@ test('the Breakdown view shows each Board with numbered rips and crosscuts, Saw 
 
   // Pieces are named: the Blank by its id, Saw Parts by their Part, kept Offcuts marked Keep.
   await expect(drawing.locator('text.piece-label', { hasText: 'W18-1-A' })).toHaveCount(1);
-  await expect(drawing.locator('text.piece-label', { hasText: 'c1/leftSide' })).toHaveCount(1);
+  await expect(drawing.locator('text.piece-label', { hasText: 'T1 · Left side' })).toHaveCount(1);
   await expect(drawing.locator('text.piece-label', { hasText: 'Keep' }).first()).toBeVisible();
 });
 
 test('the narrow op-less Part is a Saw Part, and toggling it to CNC nests it with a warning', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByLabel('Load export').setInputFiles(fixture);
+  await loadAndPlan(page);
 
   const parts = page.getByRole('table', { name: 'Parts of W18' });
-  const rail = parts.getByRole('row', { name: /c1\/s0\.rail\[1\]/ });
+  const rail = parts.getByRole('row', { name: /T1 · Rail/i });
   await expect(rail).toContainText('Saw · Board 1');
   await expect(rail).toContainText('narrow');
 
   // The 2100 mm side can't go to the CNC.
   await expect(
-    parts.getByRole('row', { name: /c1\/leftSide/ }).getByRole('checkbox', { name: 'Saw' }),
+    parts.getByRole('row', { name: /T1 · Left side/ }).getByRole('checkbox', { name: 'Saw' }),
   ).toBeDisabled();
 
   await rail.getByRole('checkbox', { name: 'Saw' }).uncheck();
@@ -47,5 +51,5 @@ test('the narrow op-less Part is a Saw Part, and toggling it to CNC nests it wit
   await expect(rail).toContainText(/W18-1-[A-Z] #\d/);
   await expect(rail).toContainText('narrow: check tabs');
   // The Layout view marks it too.
-  await expect(page.locator('svg g.narrow title', { hasText: 'c1/s0.rail[1]' })).toHaveCount(1);
+  await expect(page.locator('svg g.narrow title', { hasText: /Rail/i })).toHaveCount(1);
 });

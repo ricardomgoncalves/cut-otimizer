@@ -36,15 +36,23 @@ export interface Sheet {
 export interface Owner {
   kind: 'cabinet' | 'generatedItem';
   id: string;
-  /** Cabinet Label (`B3`) or the Generated Item's `label`. */
+  /** The Owner label: the Cabinet Label (`B3`) or the Generated Item's `label` ("Toe Kick B2"). */
   label: string;
+  /** Cabinets only: the Library Cabinet name, shown after the label where there is room ("B3 · Base door"). */
+  cabinetName?: string;
+  /** Generated Items only: the kind (`toeKick`). */
+  itemKind?: string;
 }
 
 export interface Part {
   /** Export Part id. Opaque: never parsed. */
   id: string;
-  /** The export's raw `name` (Part path or kind). */
+  /** The export's raw `name` (Part path or kind). Shown only in the Part detail panel. */
   name: string;
+  /** The Part name ("Left side", "Section 2 · Shelf 1"); `""` when it only repeated the Generated Item kind. */
+  partName: string;
+  /** How the Part is shown everywhere: `<Owner label> · <Part name>` ("B3 · Left side", "Toe Kick B2"). */
+  displayName: string;
   ownerId: string;
   sheetId: string;
   thickness: number;

@@ -1,6 +1,7 @@
 // The Job: a model, the Machine settings snapshot it was generated with, its Sheet code edits, its
-// per-Part Saw / CNC choices and the Plan made from them. Everything a Job's files come from lives here, so changing the global settings
-// changes nothing until the Job is regenerated. (The Job store and its document format are ticket #29.)
+// per-Part Saw / CNC choices and the Plan made from them. Everything a Job's files come from lives here,
+// so changing the global settings changes nothing until the Job is regenerated. The stored form is the
+// Job document (job-store/document.ts).
 import type { Model } from './model.ts';
 import { partRule, plan, type PartMode, type Plan } from './planner/index.ts';
 import { settingsChanges, type Settings } from './settings.ts';

@@ -47,6 +47,7 @@ interface FixturePart {
 interface FixtureExport {
   materials: { sheets: { thickness: number }[]; edgebands: unknown[] };
   parts: FixturePart[];
+  skipped: unknown[];
 }
 
 describe('synthetic fixture', () => {
@@ -80,6 +81,10 @@ describe('synthetic fixture', () => {
 
   it('has a Generated Item Part', () => {
     expect(file.parts.some((p) => p.owner.kind === 'generatedItem')).toBe(true);
+  });
+
+  it('has a Skipped item (an incomplete Job)', () => {
+    expect(file.skipped.length).toBeGreaterThan(0);
   });
 
   it('has two Sheets of different thickness and an Edgeband', () => {
