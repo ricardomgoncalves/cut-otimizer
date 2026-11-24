@@ -5,6 +5,8 @@ interface Props {
   board: Board;
   /** How to show a Saw Part. */
   nameOf: (partId: string) => string;
+  /** Discards a kept Offcut (it is no longer stock), or undoes that. */
+  onDiscard: (offcutId: string, discarded: boolean) => void;
 }
 
 const mm = (um: number) => um / 1000;
@@ -14,7 +16,7 @@ const fmt = (um: number) => String(Math.round(um / 100) / 10);
  * One Board's Breakdown: Blanks, Saw Parts and Offcuts, with the rips (`1, 2…`) and crosscuts
  * (`1a, 1b…`) numbered in saw order, and the cut list beside it. Front edge at the bottom, in mm.
  */
-export function BoardBreakdown({ code, board, nameOf }: Props) {
+export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
   const L = mm(board.length);
   const W = mm(board.width);
   const flipY = (y: number, h: number) => W - y - h;
@@ -64,21 +66,29 @@ export function BoardBreakdown({ code, board, nameOf }: Props) {
           </pattern>
         </defs>
         <rect x={0} y={0} width={L} height={W} fill={`url(#${hatch})`} stroke="var(--ref)" strokeWidth={4} />
-        {board.offcuts.map((o, i) => (
-          <g key={`o${String(i)}`} className={o.kept ? 'offcut kept' : 'offcut'}>
-            <title>{`Offcut ${fmt(o.length)} × ${fmt(o.width)}${o.kept ? ' (keep)' : ''}`}</title>
-            <rect
-              x={mm(o.x)}
-              y={flipY(mm(o.y), mm(o.width))}
-              width={mm(o.length)}
-              height={mm(o.width)}
-              fill={o.kept ? 'var(--offcut-bg)' : `url(#${hatch})`}
-              stroke="var(--ref)"
-              strokeWidth={2}
-            />
-            {o.kept && label(o.x, o.y, o.length, o.width, 'Keep', `${fmt(o.length)} × ${fmt(o.width)}`)}
-          </g>
-        ))}
+        {board.offcuts.map((o, i) => {
+          const size = `${fmt(o.length)} × ${fmt(o.width)}`;
+          const keep = o.kept && !o.discarded && !o.used;
+          const classes = ['offcut', o.kept ? 'kept' : '', o.discarded ? 'discarded' : '', o.used ? 'used' : ''];
+          const note = o.used ? ' (cut up for new Blanks)' : o.discarded ? ' (discarded)' : o.kept ? ' (keep)' : '';
+          return (
+            <g key={`o${String(i)}`} className={classes.join(' ').trim()}>
+              <title>{`Offcut${o.id ? ` ${o.id}` : ''} ${size}${note}`}</title>
+              <rect
+                x={mm(o.x)}
+                y={flipY(mm(o.y), mm(o.width))}
+                width={mm(o.length)}
+                height={mm(o.width)}
+                fill={o.used ? 'none' : keep ? 'var(--offcut-bg)' : `url(#${hatch})`}
+                stroke="var(--ref)"
+                strokeWidth={2}
+                strokeDasharray={o.used ? '16 10' : undefined}
+              />
+              {keep && label(o.x, o.y, o.length, o.width, o.id ? `Keep ${o.id}` : 'Keep', size)}
+              {o.discarded && label(o.x, o.y, o.length, o.width, `Discarded ${o.id ?? ''}`, size)}
+            </g>
+          );
+        })}
         {board.blanks.map((b) => (
           <g key={b.id} className="blank">
             <title>{`${b.id} ${fmt(b.length)} × ${fmt(b.width)}`}</title>
@@ -145,13 +155,38 @@ export function BoardBreakdown({ code, board, nameOf }: Props) {
           {board.cuts.map((c) => (
             <tr key={c.label}>
               <th scope="row">{c.label}</th>
-              <td>{c.kind === 'rip' ? 'rip' : 'crosscut'}</td>
+              <td>
+                {c.kind === 'rip' ? 'rip' : 'crosscut'}
+                {c.from && ` from ${c.from}`}
+              </td>
               <td>{c.kind === 'rip' ? `y ${fmt(c.y)}` : `x ${fmt(c.x)}`}</td>
               <td>{fmt(c.length)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {board.offcuts.some((o) => o.kept && !o.used && o.id) && (
+        <fieldset className="offcuts">
+          <legend>Kept Offcuts of {name}</legend>
+          {board.offcuts.map((o) =>
+            o.kept && !o.used && o.id ? (
+              <label key={o.id}>
+                <input
+                  type="checkbox"
+                  checked={o.discarded === true}
+                  onChange={(e) => {
+                    if (o.id) onDiscard(o.id, e.target.checked);
+                  }}
+                />{' '}
+                Discard {o.id}{' '}
+                <span className="tally">
+                  ({fmt(o.length)} × {fmt(o.width)})
+                </span>{' '}
+              </label>
+            ) : null,
+          )}
+        </fieldset>
+      )}
     </figure>
   );
 }

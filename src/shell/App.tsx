@@ -3,8 +3,12 @@ import { APP_NAME } from '../core/app.ts';
 import { sideBFileName, toDxfFiles } from '../core/dxf/index.ts';
 import { importExport, type ImportIssue } from '../core/import/index.ts';
 import {
+  addBoards,
   generateJob,
+  needsNesting,
   regenerate,
+  remake,
+  setOffcutDiscarded,
   setPartMode,
   setSheetCode,
   sheetCode,
@@ -114,6 +118,7 @@ export function App() {
   const [codeError, setCodeError] = useState<string | null>(null);
   /** An untick waiting for confirmation because it would unlock these Board and Blank ids. */
   const [pendingUntick, setPendingUntick] = useState<{ partId: string; step: Step; unlocks: string[] } | null>(null);
+  const [pendingRemake, setPendingRemake] = useState<string | null>(null);
   const [reimport, setReimport] = useState<PendingReimport | null>(null);
 
   useEffect(() => {
@@ -352,6 +357,38 @@ export function App() {
     save(withJob(open.doc, job, now()), open.model, job);
   }
 
+  /** Marks a ruined Part Remake (after confirmation): ticks cleared, greyed on its old Blank, nested at regenerate. */
+  function onRemake(partId: string) {
+    if (!open?.job) return;
+    const result = remake(open.job, open.doc.progress, partId);
+    if ('error' in result) {
+      setCodeError(result.error);
+      return;
+    }
+    setCodeError(null);
+    // Not a re-plan: only marks in the stored Plan change, so a pending re-import stays revertable.
+    const at = now();
+    save(withProgress({ ...open.doc, plan: result.job.plan, updatedAt: at }, result.progress, at), open.model, result.job);
+  }
+
+  function onDiscard(offcutId: string, discarded: boolean) {
+    if (!open?.job) return;
+    const result = setOffcutDiscarded(open.job, offcutId, discarded);
+    if ('error' in result) {
+      setCodeError(result.error);
+      return;
+    }
+    setCodeError(null);
+    save({ ...open.doc, plan: result.job.plan, updatedAt: now() }, open.model, result.job);
+  }
+
+  /** The person agreed to more Boards for a Sheet whose Parts fit nowhere else. */
+  function onAddBoards(sheetId: string) {
+    if (!open?.job) return;
+    const job = addBoards(open.job, [sheetId], open.doc.progress);
+    save(withJob(open.doc, job, now()), open.model, job);
+  }
+
   function onSheetCode(sheetId: string, code: string) {
     if (!open?.job) return;
     const result = setSheetCode(open.job, sheetId, code, open.doc.progress);
@@ -423,6 +460,9 @@ export function App() {
   const whereById = job ? partLocations(job.plan.sheets) : new Map<string, string>();
   const changed = job ? snapshotChanges(job, settings) : [];
   const progress: Progress = open?.doc.progress ?? {};
+  // Parts on no Board yet (Remakes not nested again): the next regenerate nests them.
+  const overflowIds = new Set(job?.plan.sheets.flatMap((s) => s.overflow ?? []) ?? []);
+  const waiting = job ? needsNesting(job).filter((id) => !overflowIds.has(id)) : [];
   const rolled = job ? rollup(job, progress) : null;
   const blankRoll = new Map(rolled?.blanks.map((b) => [b.id, b]) ?? []);
 
@@ -609,6 +649,70 @@ export function App() {
               </button>
             </div>
           )}
+          {!open?.doc.stale && waiting.length > 0 && (
+            <div role="status" className="stale warning-box">
+              <p>
+                Parts that need nesting: {waiting.map(nameOf).join(', ')}. Regenerate to nest them on a kept Offcut
+                of a Locked Board, else in the Breakdown of the unlocked Boards.
+              </p>
+              <button type="button" onClick={onRegenerate}>
+                Regenerate
+              </button>
+            </div>
+          )}
+          {job.plan.sheets.some((s) => (s.overflow ?? []).length > 0) && (
+            <section aria-label="Parts that did not fit" className="warning-box">
+              <h3>Parts that did not fit</h3>
+              {job.plan.sheets
+                .filter((s) => (s.overflow ?? []).length > 0)
+                .map((s) => {
+                  const n = s.boards.length;
+                  const extra = Math.max(1, s.extraBoards ?? 1);
+                  const which = extra === 1 ? `Board ${String(n + 1)}` : `Boards ${String(n + 1)}–${String(n + extra)}`;
+                  return (
+                    <div key={s.sheetId}>
+                      <p>
+                        {s.code}: {(s.overflow ?? []).map(nameOf).join(', ')} fit no kept Offcut of a Locked Board and
+                        no unlocked Board. Add a Board?
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onAddBoards(s.sheetId);
+                        }}
+                      >
+                        Add {which} of {n + extra} to {s.code}
+                      </button>
+                    </div>
+                  );
+                })}
+            </section>
+          )}
+          {pendingRemake && (
+            <div role="alertdialog" aria-label="Confirm Remake" className="warning-box">
+              <p>
+                Remake {nameOf(pendingRemake)}? Its ticks are cleared, it stays greyed out on its old Blank, and it is
+                nested again at the next regenerate.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingRemake(null);
+                  onRemake(pendingRemake);
+                }}
+              >
+                Remake
+              </button>{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingRemake(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {changed.length > 0 && (
             <div role="status" className="stale">
               <p>
@@ -686,10 +790,10 @@ export function App() {
               />
               <h4>Breakdown</h4>
               {sheet.boards.map((board) => {
-                const sawLeft = board.sawParts.filter((p) => progress[p.partId]?.cut === undefined).length;
+                const sawLeft = board.sawParts.filter((p) => !p.remade && progress[p.partId]?.cut === undefined).length;
                 return (
                   <div key={board.number}>
-                    <BoardBreakdown code={sheet.code} board={board} nameOf={nameOf} />
+                    <BoardBreakdown code={sheet.code} board={board} nameOf={nameOf} onDiscard={onDiscard} />
                     {board.sawParts.length > 0 && (
                       <p>
                         <button
@@ -715,10 +819,11 @@ export function App() {
                   <figure key={blank.id}>
                     <figcaption>
                       <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
-                      {blank.parts.length} Part(s){' '}
+                      {blank.from && <>from kept Offcut {blank.from} · </>}
+                      {blankRoll.get(blank.id)?.total ?? blank.parts.length} Part(s){' '}
                       <button
                         type="button"
-                        disabled={blankRoll.get(blank.id)?.cut === blank.parts.length}
+                        disabled={blankRoll.get(blank.id)?.cut === blankRoll.get(blank.id)?.total}
                         onClick={() => {
                           onProgress({ kind: 'sideADone', blankId: blank.id, at: now() });
                         }}
@@ -726,8 +831,8 @@ export function App() {
                         Side A done {blank.id}
                       </button>{' '}
                       <span className="tally">
-                        {blankRoll.get(blank.id)?.cut ?? 0} / {blank.parts.length} Cut ·{' '}
-                        {blankRoll.get(blank.id)?.done ?? 0} / {blank.parts.length} Done
+                        {blankRoll.get(blank.id)?.cut ?? 0} / {blankRoll.get(blank.id)?.total ?? blank.parts.length} Cut ·{' '}
+                        {blankRoll.get(blank.id)?.done ?? 0} / {blankRoll.get(blank.id)?.total ?? blank.parts.length} Done
                       </span>
                       {blankRoll.get(blank.id)?.locked && <span className="locked"> · Locked</span>}
                     </figcaption>
@@ -764,7 +869,9 @@ export function App() {
                 job={job}
                 sheet={sheet}
                 progress={progress}
-                needsNesting={open?.doc.stale?.needsNesting ?? []}
+                needsNesting={[...(open?.doc.stale?.needsNesting ?? []), ...waiting]}
+                overflow={sheet.overflow ?? []}
+                onRemake={setPendingRemake}
                 onMode={onPartMode}
                 onStep={onStep}
               />
@@ -849,10 +956,13 @@ function partLocations(sheets: SheetPlan[]): Map<string, string> {
   const where = new Map<string, string>();
   for (const sheet of sheets) {
     for (const board of sheet.boards) {
-      for (const blank of board.blanks) for (const p of blank.parts) where.set(p.partId, `${blank.id} #${String(p.n)}`);
-      for (const p of board.sawParts) where.set(p.partId, `Saw · ${sheet.code} Board ${String(board.number)}`);
+      for (const blank of board.blanks) {
+        for (const p of blank.parts) if (!p.remade) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+      }
+      for (const p of board.sawParts) if (!p.remade) where.set(p.partId, `Saw · ${sheet.code} Board ${String(board.number)}`);
     }
     for (const id of sheet.unplaced) where.set(id, 'Saw · too big for a Board');
+    for (const id of sheet.overflow ?? []) where.set(id, 'waiting for a Board');
   }
   return where;
 }
@@ -870,6 +980,10 @@ function PartList(props: {
   progress: Progress;
   /** After a re-import: Parts the stale Plan doesn't place as they are now. */
   needsNesting: readonly string[];
+  /** Parts that fit nowhere and wait for the person to add a Board. */
+  overflow: readonly string[];
+  /** Asks to mark a cut Part Remake. */
+  onRemake: (partId: string) => void;
   onMode: (partId: string, mode: PartMode) => void;
   onStep: (partId: string, step: Step, ticked: boolean) => void;
 }) {
@@ -878,9 +992,11 @@ function PartList(props: {
   const where = new Map<string, { text: string; narrow: boolean }>();
   for (const board of sheet.boards) {
     for (const blank of board.blanks) {
-      for (const p of blank.parts) where.set(p.partId, { text: `${blank.id} #${String(p.n)}`, narrow: p.narrow });
+      for (const p of blank.parts) {
+        if (!p.remade) where.set(p.partId, { text: `${blank.id} #${String(p.n)}`, narrow: p.narrow });
+      }
     }
-    for (const p of board.sawParts) {
+    for (const p of board.sawParts.filter((x) => !x.remade)) {
       where.set(p.partId, { text: `Saw · Board ${String(board.number)} (${SAW_REASONS[p.reason]})`, narrow: false });
     }
   }
@@ -917,7 +1033,26 @@ function PartList(props: {
                   {p.cutLength / 1000} × {p.cutWidth / 1000}
                 </td>
                 <td>
-                  {props.needsNesting.includes(p.id) ? <span className="warn">needs nesting</span> : at?.text}
+                  {props.overflow.includes(p.id) ? (
+                    <span className="warn">waiting for a Board</span>
+                  ) : props.needsNesting.includes(p.id) ? (
+                    <span className="warn">needs nesting</span>
+                  ) : (
+                    at?.text
+                  )}
+                  {at && progress[p.id]?.cut !== undefined && (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          props.onRemake(p.id);
+                        }}
+                      >
+                        Remake {p.displayName}
+                      </button>
+                    </>
+                  )}
                   {at?.narrow && <span className="warn"> · narrow: check tabs</span>}
                 </td>
                 <td>

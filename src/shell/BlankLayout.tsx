@@ -43,8 +43,10 @@ export function BlankLayout({ blank, clampMargin, nameOf, sideBOf }: Props) {
         const x = mm(p.x);
         const y = flipY(mm(p.y), h);
         const sideB = sideBOf(p.partId);
-        const classes = [p.narrow ? 'narrow' : '', sideB === undefined ? '' : 'flip'].join(' ').trim();
-        const notes = `${p.narrow ? ' (narrow: check tabs)' : ''}${sideB === undefined ? '' : ` (Flip Part: Side B ${sideB})`}`;
+        const classes = [p.narrow ? 'narrow' : '', sideB === undefined ? '' : 'flip', p.remade ? 'remade' : '']
+          .join(' ')
+          .trim();
+        const notes = `${p.narrow ? ' (narrow: check tabs)' : ''}${sideB === undefined ? '' : ` (Flip Part: Side B ${sideB})`}${p.remade ? ' (Remake: cut again on another Blank)' : ''}`;
         return (
           <g key={p.partId} className={classes || undefined}>
             <title>{`#${String(p.n)} ${nameOf(p.partId)}${notes}`}</title>
@@ -53,7 +55,8 @@ export function BlankLayout({ blank, clampMargin, nameOf, sideBOf }: Props) {
               y={y}
               width={w}
               height={h}
-              fill={sideB === undefined ? 'var(--part-bg)' : 'var(--flip-bg)'}
+              fill={p.remade ? 'var(--remade-bg)' : sideB === undefined ? 'var(--part-bg)' : 'var(--flip-bg)'}
+              opacity={p.remade ? 0.6 : undefined}
               stroke={p.narrow ? 'var(--warn)' : 'var(--part)'}
               strokeWidth={p.narrow ? 4 : 2}
               strokeDasharray={p.narrow ? '10 5' : undefined}
