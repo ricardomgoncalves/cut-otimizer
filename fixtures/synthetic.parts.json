@@ -1,0 +1,305 @@
+{
+  "format": "cabinet-planner/parts-export",
+  "schemaVersion": "1.0.0",
+  "units": "um",
+  "exportedAt": "2026-11-24T12:00:00Z",
+  "generator": {
+    "name": "cabinet-planner",
+    "version": "0.1.0"
+  },
+  "project": {
+    "name": "Synthetic fixture"
+  },
+  "library": {
+    "id": "2390551285317632001",
+    "name": "Synthetic Library"
+  },
+  "materials": {
+    "sheets": [
+      {
+        "id": "1000000000000000101",
+        "name": "White melamine chipboard 18",
+        "thickness": 18000,
+        "sheetLength": 2800000,
+        "sheetWidth": 2070000,
+        "grain": "none"
+      },
+      {
+        "id": "1000000000000000104",
+        "name": "Oak MDF 16",
+        "thickness": 16000,
+        "sheetLength": 2800000,
+        "sheetWidth": 2070000,
+        "grain": "length"
+      }
+    ],
+    "edgebands": [
+      {
+        "id": "1000000000000000201",
+        "name": "White ABS 1 × 23",
+        "thickness": 1000,
+        "width": 23000
+      }
+    ]
+  },
+  "rooms": [
+    {
+      "id": "r1",
+      "name": "Kitchen"
+    }
+  ],
+  "cabinets": [
+    {
+      "id": "c1",
+      "label": "T1",
+      "roomId": "r1",
+      "wallFace": {
+        "wallId": "w1",
+        "side": "left"
+      },
+      "libraryCabinetId": "2390551285317632200",
+      "libraryCabinetName": "Tall door",
+      "folder": "Kitchen/Tall",
+      "placementType": "tall",
+      "outsideBox": {
+        "width": 600000,
+        "height": 2250000,
+        "depth": 578000
+      },
+      "toRoom": {
+        "origin": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "yaw": 0
+      }
+    }
+  ],
+  "generatedItems": [
+    {
+      "id": "w1.left.lower.c1/toeKick",
+      "label": "Toe Kick T1",
+      "roomId": "r1",
+      "kind": "toeKick",
+      "wallFace": {
+        "wallId": "w1",
+        "side": "left"
+      },
+      "layer": "lower",
+      "chain": null,
+      "toRoom": {
+        "origin": {
+          "x": 0,
+          "y": 0,
+          "z": 488000
+        },
+        "yaw": 0
+      }
+    }
+  ],
+  "parts": [
+    {
+      "id": "c1/leftSide",
+      "name": "leftSide",
+      "owner": {
+        "kind": "cabinet",
+        "id": "c1"
+      },
+      "materialSlot": "carcass",
+      "sheetId": "1000000000000000101",
+      "thickness": 18000,
+      "length": 2100000,
+      "width": 560000,
+      "cutLength": 2100000,
+      "cutWidth": 559000,
+      "grain": "none",
+      "edges": {
+        "yW": "1000000000000000201"
+      },
+      "place": {
+        "at": {
+          "x": 0,
+          "y": 150000,
+          "z": 0
+        },
+        "length": "+Y",
+        "top": "+X"
+      },
+      "ops": []
+    },
+    {
+      "id": "c1/s0.shelf[0]",
+      "name": "s0.shelf[0]",
+      "owner": {
+        "kind": "cabinet",
+        "id": "c1"
+      },
+      "materialSlot": "carcass",
+      "sheetId": "1000000000000000101",
+      "thickness": 18000,
+      "length": 564000,
+      "width": 520000,
+      "cutLength": 564000,
+      "cutWidth": 519000,
+      "grain": "none",
+      "edges": {
+        "yW": "1000000000000000201"
+      },
+      "place": {
+        "at": {
+          "x": 18000,
+          "y": 900000,
+          "z": 20000
+        },
+        "length": "+X",
+        "top": "+Y"
+      },
+      "ops": [
+        {
+          "type": "drill",
+          "face": "x0",
+          "at": {
+            "y": 260000,
+            "z": 9000
+          },
+          "diameter": 8000,
+          "depth": 30000,
+          "source": {
+            "kind": "op",
+            "index": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "c1/s0.rail[1]",
+      "name": "s0.rail[1]",
+      "owner": {
+        "kind": "cabinet",
+        "id": "c1"
+      },
+      "materialSlot": "carcass",
+      "sheetId": "1000000000000000101",
+      "thickness": 18000,
+      "length": 564000,
+      "width": 40000,
+      "cutLength": 564000,
+      "cutWidth": 40000,
+      "grain": "none",
+      "edges": {},
+      "place": {
+        "at": {
+          "x": 18000,
+          "y": 2232000,
+          "z": 0
+        },
+        "length": "+X",
+        "top": "+Y"
+      },
+      "ops": []
+    },
+    {
+      "id": "c1/s0.door.leaf[0]",
+      "name": "s0.door.leaf[0]",
+      "owner": {
+        "kind": "cabinet",
+        "id": "c1"
+      },
+      "materialSlot": "front",
+      "sheetId": "1000000000000000101",
+      "thickness": 18000,
+      "length": 700000,
+      "width": 597000,
+      "cutLength": 698000,
+      "cutWidth": 595000,
+      "grain": "none",
+      "edges": {
+        "x0": "1000000000000000201",
+        "xL": "1000000000000000201",
+        "y0": "1000000000000000201",
+        "yW": "1000000000000000201"
+      },
+      "place": {
+        "at": {
+          "x": 1500,
+          "y": 1550000,
+          "z": 560000
+        },
+        "length": "+Y",
+        "top": "+Z"
+      },
+      "ops": [
+        {
+          "type": "drill",
+          "face": "bottom",
+          "at": {
+            "x": 650000,
+            "y": 560000
+          },
+          "diameter": 5000,
+          "through": true,
+          "source": {
+            "kind": "op",
+            "index": 0
+          }
+        },
+        {
+          "type": "drill",
+          "face": "bottom",
+          "at": {
+            "x": 100000,
+            "y": 22500
+          },
+          "diameter": 35000,
+          "depth": 13000,
+          "source": {
+            "kind": "hardware",
+            "hardwareKind": "hinge",
+            "itemId": "1000000000000000301",
+            "itemName": "Clip top hinge 110°",
+            "pattern": "cup",
+            "placement": "hardware:s0.door.leaf/0[0,0]"
+          }
+        }
+      ]
+    },
+    {
+      "id": "w1.left.lower.c1/toeKick/0",
+      "name": "toeKick",
+      "owner": {
+        "kind": "generatedItem",
+        "id": "w1.left.lower.c1/toeKick"
+      },
+      "sheetId": "1000000000000000104",
+      "thickness": 16000,
+      "length": 600000,
+      "width": 140000,
+      "cutLength": 600000,
+      "cutWidth": 140000,
+      "grain": "length",
+      "edges": {},
+      "place": {
+        "at": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "length": "+X",
+        "top": "+Z"
+      },
+      "ops": []
+    }
+  ],
+  "skipped": [
+    {
+      "kind": "cabinet",
+      "id": "c2",
+      "label": "T2",
+      "roomId": "r1",
+      "name": "Tall pantry",
+      "reason": "invalid",
+      "problems": ["check.minWidth"]
+    }
+  ]
+}

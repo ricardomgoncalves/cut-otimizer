@@ -1,0 +1,139 @@
+text 12,20 6 bold "Cut sheet · Kitchen run"
+text 12,26 3.1 #666666 "Job 7F3A · generated 2026-11-26 15:00"
+text 12,31 3.1 bold "5 Parts · 2 Boards · 3 Blanks · 1 Side B file"
+text 12,38 3.6 bold "Order of work"
+text 12,44 3.1 "1. Saw: break each Board into Blanks and Saw Parts (pages 2–3)"
+text 12,48.1 3.1 "2. CNC Side A: one file per Blank (3 files)"
+text 12,52.1 3.1 "3. CNC Side B: Flip Parts, after Side A (1 file)"
+text 12,56.1 3.1 "4. Edge banding"
+text 12,60.2 3.1 "5. Manual ops, by hand"
+text 12,64.2 3.1 "6. Check every Part off and assemble"
+box 12,67.2 186x23.2 stroke #000000 0.4
+text 14,72.2 3.1 bold "Before you start"
+text 14,76.2 3.1 "Saw Parts: 1 (B1 · Back), cut on the saw, not on the CNC."
+text 14,80.3 3.1 "Manual ops: 1 on 1 Part, done by hand."
+text 14,84.3 3.1 "Skipped items: none."
+text 14,88.3 3.1 "Spares: 2 cut Parts no longer in the export (B1 · Shelf 2, B1 · Rail): set them aside. They count nowhere."
+text 12,97.3 3.6 bold "Materials"
+text 13.2,102.7 2.6 bold #666666 "Sheet"
+text 99.2,102.7 2.6 bold #666666 "Code"
+text 136.8,102.7 2.6 bold end #666666 "Boards"
+text 156.8,102.7 2.6 bold end #666666 "Blanks"
+text 176.8,102.7 2.6 bold end #666666 "Saw Parts"
+text 196.8,102.7 2.6 bold end #666666 "Parts"
+line 12,104.1 198,104.1 0.3
+text 13.2,107.5 3.1 "White melamine 18 · 2800 × 2070 · grain none"
+text 99.2,107.5 3.1 bold "W18"
+text 136.8,107.5 3.1 bold end "1"
+text 156.8,107.5 3.1 end "2"
+text 176.8,107.5 3.1 end "1"
+text 196.8,107.5 3.1 end "4"
+line 12,108.9 198,108.9 0.1 #999999
+text 13.2,112.3 3.1 "Oak MDF 16 · 2440 × 1220 · grain length"
+text 99.2,112.3 3.1 bold "O16"
+text 136.8,112.3 3.1 bold end "1"
+text 156.8,112.3 3.1 end "1"
+text 176.8,112.3 3.1 end "0"
+text 196.8,112.3 3.1 end "1"
+line 12,113.7 198,113.7 0.1 #999999
+text 12,120.7 3.6 bold "Machine settings (snapshot)"
+text 108,120.7 3.6 bold "Edgebanding"
+text 13.2,126.1 2.6 bold #666666 "Setting"
+text 100.8,126.1 2.6 bold end #666666 "mm"
+line 12,127.5 102,127.5 0.3
+text 13.2,130.9 3.1 "Bed"
+text 100.8,130.9 3.1 end "1300 × 1300"
+line 12,132.3 102,132.3 0.1 #999999
+text 13.2,135.7 3.1 "Clamp margin (4 edges)"
+text 100.8,135.7 3.1 end "40"
+line 12,137.1 102,137.1 0.1 #999999
+text 13.2,140.5 3.1 "Bit"
+text 100.8,140.5 3.1 end "Ø6"
+line 12,141.9 102,141.9 0.1 #999999
+text 13.2,145.3 3.1 "Saw kerf"
+text 100.8,145.3 3.1 end "3.2"
+line 12,146.7 102,146.7 0.1 #999999
+text 13.2,150.1 3.1 "Edge trim"
+text 100.8,150.1 3.1 end "0 · W18 5"
+line 12,151.5 102,151.5 0.1 #999999
+text 13.2,154.9 3.1 "Min CNC width"
+text 100.8,154.9 3.1 end "50"
+line 12,156.3 102,156.3 0.1 #999999
+text 13.2,159.7 3.1 "Min Offcut size"
+text 100.8,159.7 3.1 end "150"
+line 12,161.1 102,161.1 0.1 #999999
+text 13.2,164.5 3.1 "Bottom ops done by hand"
+text 100.8,164.5 3.1 end "none"
+line 12,165.9 102,165.9 0.1 #999999
+text 12,169.3 2.6 bold "Outlines need tabs or onion skin in CAM"
+text 109.2,126.1 2.6 bold #666666 "Edgeband"
+text 168.8,126.1 2.6 bold end #666666 "Edges"
+text 196.8,126.1 2.6 bold end #666666 "Length (+10%)"
+line 108,127.5 198,127.5 0.3
+text 109.2,130.9 3.1 "White ABS 1 × 23"
+text 168.8,130.9 3.1 end "6"
+text 196.8,130.9 3.1 end "2.6 m"
+line 108,132.3 198,132.3 0.1 #999999
+text 12,176.3 3.6 bold "Layer legend"
+text 13.2,181.7 2.6 bold #666666 "Layer"
+text 80.8,181.7 2.6 bold end #666666 "Count"
+text 98.8,181.7 2.6 bold end #666666 "Stock"
+text 101.2,181.7 2.6 bold #666666 "Suggested toolpath"
+line 12,183.1 198,183.1 0.3
+text 13.2,186.5 3.1 bold "DRILL_D35_Z13"
+text 80.8,186.5 3.1 end "1"
+text 98.8,186.5 3.1 end "18"
+text 101.2,186.5 3.1 "Helix or pocket with the Ø6 bit"
+line 12,187.9 198,187.9 0.1 #999999
+text 13.2,191.3 3.1 bold "DRILL_D5_Z12"
+text 80.8,191.3 3.1 end "2"
+text 98.8,191.3 3.1 end "18"
+text 101.2,191.3 3.1 "Drill: needs a Ø5 bit (tool change)"
+line 12,192.7 198,192.7 0.1 #999999
+text 13.2,196.1 3.1 bold "GROOVE_W8_Z8"
+text 80.8,196.1 3.1 end "1"
+text 98.8,196.1 3.1 end "18"
+text 101.2,196.1 3.1 "Pocket (slot) to depth"
+line 12,197.5 198,197.5 0.1 #999999
+text 13.2,200.9 3.1 bold "OUTLINE_THRU"
+text 80.8,200.9 3.1 end "1"
+text 98.8,200.9 3.1 end "16"
+text 101.2,200.9 3.1 "Profile outside, through: tabs or onion skin"
+line 12,202.3 198,202.3 0.1 #999999
+text 13.2,205.7 3.1 bold "OUTLINE_THRU"
+text 80.8,205.7 3.1 end "3"
+text 98.8,205.7 3.1 end "18"
+text 101.2,205.7 3.1 "Profile outside, through: tabs or onion skin"
+line 12,207.1 198,207.1 0.1 #999999
+text 12,210.5 2.6 #666666 "Reference layers, never cut: REF_V1 · REF_BLANK · REF_CLAMP · REF_PART"
+text 12,217.5 3.6 bold "Spares"
+text 13.2,222.9 2.6 bold #666666 "Spare (old name)"
+text 93.2,222.9 2.6 bold #666666 "Cut size"
+text 133.2,222.9 2.6 bold #666666 "Was cut at"
+line 12,224.3 198,224.3 0.3
+text 13.2,227.7 3.1 bold "B1 · Shelf 2"
+text 93.2,227.7 3.1 "564 × 519 × 18"
+text 133.2,227.7 3.1 "W18-1-A #3"
+line 12,229.1 198,229.1 0.1 #999999
+text 13.2,232.5 3.1 bold "B1 · Rail"
+text 93.2,232.5 3.1 "564 × 40 × 18"
+text 133.2,232.5 3.1 #666666 "—"
+line 12,233.9 198,233.9 0.1 #999999
+text 12,240.9 3.6 bold "Re-import log"
+text 13.2,246.3 2.6 bold #666666 "Applied"
+text 41.2,246.3 2.6 bold #666666 "Exported"
+text 69.2,246.3 2.6 bold #666666 "File"
+text 119.2,246.3 2.6 bold #666666 "Parts"
+line 12,247.7 198,247.7 0.3
+text 13.2,251.1 3.1 "2026-11-25 08:30"
+text 41.2,251.1 3.1 "2026-11-25 08:00"
+text 69.2,251.1 3.1 "kitchen-v2.parts.json"
+text 119.2,251.1 3.1 "1 Changed (cut) · 2 Added · 2 Removed · 3 Same"
+line 12,252.5 198,252.5 0.1 #999999
+text 13.2,255.9 3.1 "2026-11-26 14:05"
+text 41.2,255.9 3.1 #666666 "—"
+text 69.2,255.9 3.1 "kitchen-v3.parts.json"
+text 119.2,255.9 3.1 "1 Changed (finishing) · 4 Renamed · 4 Same"
+line 12,257.3 198,257.3 0.1 #999999
+text 12,290 2.6 #666666 "Kitchen run · Job 7F3A"
+text 198,290 2.6 end #666666 "Page 1 of 9"

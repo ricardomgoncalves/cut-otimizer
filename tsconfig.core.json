@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.core.tsbuildinfo",
+    // Pure core: no DOM lib and no ambient @types, so `window`, `document`
+    // and friends do not exist here. React imports are blocked by ESLint.
+    "lib": ["ES2023"],
+    "types": []
+  },
+  // The vendored Parts Export schema is imported as JSON by the Import module.
+  "include": ["src/core", "vendor/parts-export/*.json"]
+}

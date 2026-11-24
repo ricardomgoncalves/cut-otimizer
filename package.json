@@ -1,0 +1,47 @@
+{
+  "name": "cut-optimizer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "gen:types": "bun scripts/gen-types.ts",
+    "gen:fonts": "bun scripts/gen-font-metrics.ts",
+    "e2e": "playwright test",
+    "check": "bun run typecheck && bun run lint && bun run test && bun run build && bun run e2e"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "dexie": "^4.4.7",
+    "fflate": "0.8.2",
+    "jsqr": "1.4.0",
+    "maxrects-packer": "^3.0.0",
+    "pdf-lib": "1.17.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.8",
+    "fake-indexeddb": "^6.2.8",
+    "globals": "^17.14.0",
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.74.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  }
+}
