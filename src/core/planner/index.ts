@@ -28,7 +28,8 @@
 //   Sheet. Each Blank records the clamp margin it was nested with, so a Locked Blank's DXF doesn't change
 //   when the margin does.
 import { MaxRectsBin, PACKING_LOGIC, Rectangle } from 'maxrects-packer';
-import type { CncOp, Model, Part, Sheet } from '../model.ts';
+import type { CncOp, Model, Part, PartEdge, Sheet } from '../model.ts';
+import type { Step } from '../progress.ts';
 import { edgeTrimFor, type Settings } from '../settings.ts';
 import { sideB, type JobManualOp, type SideBFile } from './side-b.ts';
 
@@ -90,6 +91,39 @@ export interface Blank {
   clampMargin?: number;
   /** In `#n` order. */
   parts: Placement[];
+  /**
+   * What the Blank's Side A page shows, frozen while the Blank is Locked (PRD 11.8: its PDF page isn't
+   * rewritten). Taken just before a re-import or a regenerate could change the Parts, Side B files or
+   * Manual ops under it, and kept with the Locked Blank from then on. Unset (every Blank of an older stored
+   * Plan, and every unlocked Blank): the page shows the Parts as the model has them now.
+   */
+  sideA?: SideAPrint;
+}
+
+/** A Blank's Side A page data (see `Blank.sideA`). */
+export interface SideAPrint {
+  /** The Sheet's name. */
+  sheetName: string;
+  /** By `#n` (as text). */
+  parts: Record<string, PartPrint>;
+}
+
+/** One Part's row and drawing details on a Side A page. A Part missing from the model has only `name` (its id) and the cut size. */
+export interface PartPrint {
+  name: string;
+  cutLength: number;
+  cutWidth: number;
+  /** Cut size plus Edgeband thicknesses. */
+  finished?: { length: number; width: number };
+  /** Banded edges in x0, xL, y0, yW order, with the Edgeband's name. */
+  bands: { edge: PartEdge; name: string }[];
+  grainLength: boolean;
+  /** Its Side B file id, for a Flip Part. */
+  sideB?: string;
+  /** Its Manual op texts. */
+  manualOps: string[];
+  /** The Steps that apply to it (tick boxes). */
+  steps: Step[];
 }
 
 /** Why a Part is cut on the saw. */
@@ -573,7 +607,10 @@ function relayBlank(ctx: Ctx, blank: Blank, cncById: ReadonlyMap<string, Part>):
         nestingOrder(mine.flatMap((p) => cncById.get(p.partId) ?? [])),
       ).placed;
   const parts = [...placed].sort((a, b) => a.y - b.y || a.x - b.x).map((p, k) => ({ n: k + 1, ...p }));
-  return { ...blank, clampMargin: clamp, parts };
+  // Laid out again, so its page is printed anew: drop a frozen page from when it was Locked.
+  const out: Blank = { ...blank, clampMargin: clamp, parts };
+  delete out.sideA;
+  return out;
 }
 
 function withoutN(p: Placement): Omit<Placement, 'n'> {

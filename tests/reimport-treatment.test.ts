@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import type { PartsExport } from '../src/core/import/parts-export.v1.generated.ts';
 import { partLocations } from '../src/core/documents/index.ts';
 import { labelOrder, reimportLabelOrder } from '../src/core/documents/labels.ts';
+import { sideAPages } from '../src/core/documents/side-a.ts';
+import type { CutSheetJob } from '../src/core/documents/index.ts';
 import { toDxfFiles } from '../src/core/dxf/index.ts';
 import { importExport } from '../src/core/import/index.ts';
 import { generateJob, needsNesting as needsNestingOf, regenerate, remake, type Job } from '../src/core/job.ts';
@@ -20,6 +22,7 @@ import {
 } from '../src/core/job-store/document.ts';
 import type { Model } from '../src/core/model.ts';
 import type { Placement, Plan, SawPlacement } from '../src/core/planner/index.ts';
+import { pageText } from './page-text.ts';
 import { apply, rollup, steps, type Progress, type ProgressEvent } from '../src/core/progress.ts';
 import { applyDiff, diff, voidText, type DiffChoices } from '../src/core/reimport.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
@@ -171,6 +174,50 @@ describe('Changed (cut), not cut yet', () => {
     const after = reimport(documentWith(cut(DOOR)), exportWith(narrower(RAIL, 1000)));
     expect(placements(after.plan, RAIL)).toEqual([{ where: 'W18-1 saw', p: expect.objectContaining({ voided: 'moved' }) }]);
     expect(after.stale?.needsNesting).toEqual([RAIL]);
+  });
+});
+
+describe("a Locked Blank's Side A page (PRD 11.8)", () => {
+  /** The Side A page(s) of one Blank as text, with the same Job header every time. */
+  function sideAText(plan: Plan, model: Model, blankId: string): string {
+    const job: CutSheetJob = { name: 'Kitchen', shortId: 'K7Q2', generatedAt: '2026-11-24 10:00', model, skipped: [] };
+    return sideAPages(plan, job)
+      .filter((page) => page.items.some((it) => it.kind === 'text' && it.text.endsWith(`CNC Side A · ${blankId}`)))
+      .map(pageText)
+      .join('\n');
+  }
+
+  const renamedBands = (f: PartsExport) => {
+    for (const e of f.materials.edgebands) e.name = `New ${e.name}`;
+  };
+
+  it('is not rewritten by a re-import that changes Parts on it, nor by the Regenerate after it', () => {
+    const doc = documentWith(cut(DOOR));
+    const before = sideAText(opened(doc).plan, opened(doc).model, 'W18-1-A');
+    expect(before).toContain('W18-1-A.side-a.dxf');
+
+    // The shelf (uncut) gets narrower: a "moved" void. The door (cut) loses a banded edge and the
+    // Edgeband is renamed: its finishing changed.
+    const file = exportWith((f) => {
+      narrower(SHELF)(f);
+      delete part(f, DOOR).edges.x0;
+      renamedBands(f);
+    });
+    const after = reimport(doc, file);
+    const stale = opened(after);
+    expect(sideAText(stale.plan, stale.model, 'W18-1-A')).toBe(before);
+
+    const job = regenerate(stale, { ...DEFAULT_SETTINGS, manualBottomOpKinds: [] }, after.progress);
+    expect(sideAText(job.plan, job.model, 'W18-1-A')).toBe(before);
+  });
+
+  it("an unlocked Blank's page shows its Parts as they are now", () => {
+    const doc = documentWith();
+    const before = sideAText(opened(doc).plan, opened(doc).model, 'W18-1-A');
+    const stale = opened(reimport(doc, exportWith(renamedBands)));
+    const now = sideAText(stale.plan, stale.model, 'W18-1-A');
+    expect(now).not.toBe(before);
+    expect(now).toContain("New White");
   });
 });
 

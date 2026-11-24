@@ -20,8 +20,21 @@ import {
   type Job,
 } from '../src/core/job.ts';
 import type { Model } from '../src/core/model.ts';
+import type { Board } from '../src/core/planner/index.ts';
 import { apply, type Progress } from '../src/core/progress.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
+
+/** Boards without their Locked Blanks' frozen Side A pages (`Blank.sideA`), which a regenerate adds. */
+function unfrozen(boards: readonly Board[] | undefined): Board[] | undefined {
+  return boards?.map((b) => ({
+    ...b,
+    blanks: b.blanks.map((x) => {
+      const blank = { ...x };
+      delete blank.sideA;
+      return blank;
+    }),
+  }));
+}
 
 function syntheticModel(): Model {
   const json: unknown = JSON.parse(
@@ -185,9 +198,10 @@ describe('Locked Boards and Blanks on regenerate', () => {
     const regenerated = regenerate(job, edited, shelfCut);
 
     expect(regenerated.settings).toEqual(edited);
-    expect(regenerated.plan.sheets[0]?.boards).toEqual(job.plan.sheets[0]?.boards);
+    expect(unfrozen(regenerated.plan.sheets[0]?.boards)).toEqual(job.plan.sheets[0]?.boards);
     const after = toDxfFiles(regenerated.plan, 'J1');
     expect(after.get('W18-1-A.side-a.dxf')).toEqual(before.get('W18-1-A.side-a.dxf'));
+    expect(regenerated.plan.sheets[0]?.boards[0]?.blanks[0]?.sideA?.sheetName).toBeDefined();
     // The O16 Blank holds nothing cut, so it is nested again with the 60 mm margin.
     expect(after.get('O16-1-A.side-a.dxf')).not.toEqual(before.get('O16-1-A.side-a.dxf'));
     expect(after.get('O16-1-A.side-a.dxf')).toContain('\n60\n');
@@ -210,7 +224,7 @@ describe('Locked Boards and Blanks on regenerate', () => {
     const toe = setPartMode(job, 'w1.left.lower.c1/toeKick/0', 'saw', shelfCut);
     if ('error' in toe) throw new Error(toe.error);
     const regenerated = regenerate(toe.job, DEFAULT_SETTINGS, shelfCut);
-    expect(regenerated.plan.sheets[0]?.boards).toEqual(job.plan.sheets[0]?.boards);
+    expect(unfrozen(regenerated.plan.sheets[0]?.boards)).toEqual(job.plan.sheets[0]?.boards);
     expect(regenerated.plan.sheets[1]?.sawParts).toEqual(['w1.left.lower.c1/toeKick/0']);
   });
 

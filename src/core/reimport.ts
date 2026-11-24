@@ -11,6 +11,7 @@
 // (`s0.shelf[2]` and `s0.shelf[3]` pair). That catches renamed Generated Item Parts and
 // repeat-count renames.
 import { describeChange } from './change-text.ts';
+import { freezeLockedPages } from './documents/index.ts';
 import { partLocations, partRunOrder } from './documents/work.ts';
 import { freeSheetCode } from './import/index.ts';
 import { withHandFixes, type JobDocument, type Spare } from './job-store/document.ts';
@@ -336,7 +337,8 @@ export function applyDiff(doc: JobDocument, current: Model, next: NextExport, d:
   const oldParts = new Map(current.parts.map((p) => [p.id, p]));
   const oldWhere = locations(doc.plan);
   let progress = renameKeys(doc.progress, renames);
-  let plan = doc.plan && renamePlanParts(doc.plan, renames);
+  // The Side A pages of Locked Blanks keep what they were printed with, whatever the new export says.
+  let plan = doc.plan && renamePlanParts(freezeLockedPages(doc.plan, current, (id) => isCut(doc.progress, id)), renames);
   const handFixes: Record<string, string[]> = Object.fromEntries(
     Object.entries(renameKeys(doc.handFixes, renames)).filter(([id]) => live.has(id)),
   );

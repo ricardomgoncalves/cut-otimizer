@@ -1,8 +1,9 @@
 // Side A pages: one per Blank in Run order. A header naming the Blank's DXF file, the Blank drawing
 // (top view, origin front-left), the Part table with Step ticks, the Blank's Manual ops and a
 // "Side A done" box.
-import type { Part, PartEdge, Point } from '../model.ts';
-import type { Blank, Placement, Plan, SheetPlan } from '../planner/index.ts';
+import type { Model, PartEdge, Point } from '../model.ts';
+import { blankLocked, type Blank, type PartPrint, type Placement, type Plan, type SheetPlan, type SideAPrint } from '../planner/index.ts';
+import { steps } from '../progress.ts';
 import { arrow, circle, flipMark, opItems } from './drawing.ts';
 import { mmText, sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, Flow, GREY, MARGIN, SHADE, WHITE, fitSize, table, text, tickBox, type Cell } from './layout.ts';
@@ -10,15 +11,13 @@ import { BLACK, type Item, type Page } from './page.ts';
 import { textWidth } from './text.ts';
 import {
   DASH,
+  STEP_COLUMNS,
   bandedEdges,
-  bandingCell,
   clampOf,
-  cutText,
-  finishedText,
+  edgebandName,
+  finishedSize,
   plural,
   sectionNumber,
-  sideBCell,
-  stepCells,
   stepColumns,
   workHeader,
   type CutSheetJob,
@@ -41,9 +40,54 @@ export function sideAPages(plan: Plan, job: CutSheetJob): Page[] {
   );
 }
 
+/**
+ * What a Blank's Side A page shows, from the model and Plan as they are now: the Sheet name, and per `#n`
+ * the Part's name, sizes, banding, grain, Side B file, Manual ops and Steps.
+ */
+export function sideAPrint(plan: Plan, model: Model, sheet: SheetPlan, blank: Blank): SideAPrint {
+  const parts: Record<string, PartPrint> = {};
+  for (const pl of blank.parts) {
+    const part = model.parts.find((p) => p.id === pl.partId);
+    const sideB = plan.sideB.find((f) => f.partIds.includes(pl.partId))?.id;
+    parts[String(pl.n)] = {
+      name: part?.displayName ?? pl.partId,
+      cutLength: part?.cutLength ?? pl.cutLength,
+      cutWidth: part?.cutWidth ?? pl.cutWidth,
+      ...(part ? { finished: finishedSize(model, part) } : {}),
+      bands: part ? bandedEdges(part).map(({ edge, band }) => ({ edge, name: edgebandName(model, band) })) : [],
+      grainLength: part?.grain === 'length',
+      ...(sideB === undefined ? {} : { sideB }),
+      manualOps: plan.manualOps.filter((m) => m.partId === pl.partId).map((m) => m.text),
+      steps: steps({ model, plan }, pl.partId),
+    };
+  }
+  return { sheetName: model.sheets.find((s) => s.id === sheet.sheetId)?.name ?? sheet.code, parts };
+}
+
+/**
+ * Freezes the Side A page of every Locked Blank (a Part on it ticked Cut, or a Remake) that isn't frozen
+ * yet, from the model and Plan the page was printed from (PRD 11.8). Call it before a re-import or a
+ * regenerate changes what the page would show. The same Plan when there is nothing to freeze.
+ */
+export function freezeLockedPages(plan: Plan, model: Model, isCut: (partId: string) => boolean): Plan {
+  let changed = false;
+  const sheets = plan.sheets.map((sheet) => ({
+    ...sheet,
+    boards: sheet.boards.map((board) => ({
+      ...board,
+      blanks: board.blanks.map((blank) => {
+        if (blank.sideA || !blankLocked(blank, isCut)) return blank;
+        changed = true;
+        return { ...blank, sideA: sideAPrint(plan, model, sheet, blank) };
+      }),
+    })),
+  }));
+  return changed ? { ...plan, sheets } : plan;
+}
+
 function blankPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, blank: Blank, number: string): Page[] {
-  const model = job.model;
-  const sheetName = model.sheets.find((s) => s.id === sheet.sheetId)?.name ?? sheet.code;
+  const print = blank.sideA ?? sideAPrint(plan, job.model, sheet, blank);
+  const sheetName = print.sheetName;
   const title = `${number} · CNC Side A · ${blank.id}`;
   const topOps = blank.parts.reduce((n, p) => n + p.ops.length, 0);
   const sub = [
@@ -54,10 +98,11 @@ function blankPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, blank: Blank
     plural(topOps, 'top op'),
   ].join(' · ');
   const flow = new Flow((page, continued) => workHeader(page, job, continued ? `${title} (continued)` : title, sub));
-  const parts = new Map(model.parts.map((p) => [p.id, p]));
+  const of = (pl: Placement): PartPrint =>
+    print.parts[String(pl.n)] ?? { name: pl.partId, cutLength: pl.cutLength, cutWidth: pl.cutWidth, bands: [], grainLength: false, manualOps: [], steps: [] };
 
   flow.y += 2;
-  flow.add(...blankDrawing(plan, blank, parts, flow.y));
+  flow.add(...blankDrawing(plan, blank, of, flow.y));
   flow.y += drawingHeight(blank) + 9;
   flow.add(...key(flow.y));
   flow.y += 1;
@@ -77,25 +122,25 @@ function blankPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, blank: Blank
       ...stepColumns(12),
     ],
     blank.parts.map((pl): Cell[] => {
-      const part = parts.get(pl.partId);
-      const ops = plan.manualOps.filter((m) => m.partId === pl.partId).length;
+      const part = of(pl);
+      const ops = part.manualOps.length;
       return [
         { text: `#${String(pl.n)}`, bold: true },
-        { text: part?.displayName ?? pl.partId, bold: true, ...(pl.narrow ? { sub: 'narrow: check tabs' } : {}) },
-        part ? finishedText(model, part) : '',
-        part ? cutText(part) : { text: sizeText(pl.cutLength, pl.cutWidth), bold: true },
-        part ? bandingCell(model, part) : DASH,
-        part?.grain === 'length' ? 'length' : DASH,
-        sideBCell(plan, pl.partId),
+        { text: part.name, bold: true, ...(pl.narrow ? { sub: 'narrow: check tabs' } : {}) },
+        part.finished ? sizeText(part.finished.length, part.finished.width) : '',
+        { text: sizeText(part.cutLength, part.cutWidth), bold: true },
+        part.bands.length === 0
+          ? DASH
+          : { text: part.bands.map((b) => b.edge).join(' '), sub: [...new Set(part.bands.map((b) => b.name))].join(', ') },
+        part.grainLength ? 'length' : DASH,
+        part.sideB === undefined ? DASH : { text: part.sideB, bold: true, pill: true },
         ops === 0 ? DASH : { text: plural(ops, 'op'), sub: 'listed below' },
-        ...stepCells(plan, model, pl.partId),
+        ...STEP_COLUMNS.map((c): Cell => (part.steps.includes(c.step) ? { tick: true } : DASH)),
       ];
     }),
   );
 
-  const manual = blank.parts.flatMap((pl) =>
-    plan.manualOps.filter((m) => m.partId === pl.partId).map((m) => `#${String(pl.n)} ${parts.get(pl.partId)?.displayName ?? pl.partId}: ${m.text}`),
-  );
+  const manual = blank.parts.flatMap((pl) => of(pl).manualOps.map((text) => `#${String(pl.n)} ${of(pl).name}: ${text}`));
   if (manual.length > 0) {
     flow.y += 2;
     flow.paragraph('Manual ops on this Blank, by hand', { bold: true, size: FONT.small });
@@ -131,7 +176,7 @@ function footprint(pl: Placement): { length: number; width: number; toBlank: (p:
 }
 
 /** The Blank seen from the top, front edge at the bottom, centred under the header from `top`. */
-function blankDrawing(plan: Plan, blank: Blank, parts: Map<string, Part>, top: number): Item[] {
+function blankDrawing(plan: Plan, blank: Blank, of: (pl: Placement) => PartPrint, top: number): Item[] {
   const s = drawingScale(blank);
   const w = blank.length * s;
   const h = blank.width * s;
@@ -152,24 +197,22 @@ function blankDrawing(plan: Plan, blank: Blank, parts: Map<string, Part>, top: n
   });
 
   for (const pl of blank.parts) {
-    const part = parts.get(pl.partId);
+    const part = of(pl);
     const fp = footprint(pl);
     const r = rect(pl.x, pl.y, fp.length, fp.width);
-    const flip = plan.sideB.some((f) => f.partIds.includes(pl.partId));
+    const flip = part.sideB !== undefined;
     const toPage = (p: Point): [number, number] => {
       const b = fp.toBlank(p);
       return [X(b.x), Y(b.y)];
     };
     items.push({ kind: 'box', ...r, fill: flip ? SHADE : WHITE, stroke: BLACK, lineWidth: 0.3, ...(pl.narrow ? { dash: [1, 0.6] } : {}) });
     for (const op of pl.ops) items.push(...opItems(op, toPage, s, pl.cutLength, pl.cutWidth));
-    if (part) {
-      for (const { edge } of bandedEdges(part)) items.push(bandLine(edge, pl, toPage, r));
-      if (part.grain === 'length' && Math.min(r.width, r.height) > 5) {
-        const along = Math.min(8, (pl.rotated ? r.height : r.width) - 4);
-        const x0 = r.x + 2;
-        const y0 = r.y + r.height - 2;
-        items.push(...(pl.rotated ? arrow(x0, y0, x0, y0 - along) : arrow(x0, y0, x0 + along, y0)));
-      }
+    for (const { edge } of part.bands) items.push(bandLine(edge, pl, toPage, r));
+    if (part.grainLength && Math.min(r.width, r.height) > 5) {
+      const along = Math.min(8, (pl.rotated ? r.height : r.width) - 4);
+      const x0 = r.x + 2;
+      const y0 = r.y + r.height - 2;
+      items.push(...(pl.rotated ? arrow(x0, y0, x0, y0 - along) : arrow(x0, y0, x0 + along, y0)));
     }
     items.push(...numberLabel(r, `#${String(pl.n)}`));
     if (flip && r.width > 7 && r.height > 7) items.push(...flipMark(r.x + r.width - 2.2, r.y + 2.2, 1.2));

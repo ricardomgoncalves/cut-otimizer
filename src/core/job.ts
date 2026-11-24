@@ -5,8 +5,10 @@
 //
 // Locked Boards and Blanks (those with a Part ticked Cut, so derived from the Job's progress) survive every
 // re-plan here: `regenerate` and `addBoards` pass the stored Plan and the Cut Part ids to the Planner, which
-// keeps Locked Blanks exactly as they are and Locked Boards' Breakdowns. The Saw / CNC toggle and Sheet code
+// keeps Locked Blanks exactly as they are and Locked Boards' Breakdowns. A Locked Blank's Side A page is
+// frozen first, so new settings (Side B files, Manual ops) don't rewrite it either. The Saw / CNC toggle and Sheet code
 // edits only record the choice; the next Regenerate applies it.
+import { freezeLockedPages } from './documents/index.ts';
 import type { Model } from './model.ts';
 import {
   blankLocked,
@@ -69,7 +71,7 @@ function planJob(
     plan: plan(
       withSheetCodes(model, sheetCodes),
       snapshot,
-      prior ? { sawCnc, plan: prior, cut, addBoards } : { sawCnc },
+      prior ? { sawCnc, plan: freezeLockedPages(prior, model, (id) => isCut(progress, id)), cut, addBoards } : { sawCnc },
     ),
   };
 }
