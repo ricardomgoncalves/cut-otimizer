@@ -21,6 +21,27 @@ _Avoid_: material, stock (for the definition); sheet (for a physical board)
 **Skipped item** _(export)_:
 Something cabinet-planner could not turn into Parts, listed in the export's `skipped` with a reason. If there are any, the Job is incomplete.
 
+**Cabinet** _(export)_:
+One placed cabinet in the Project. It owns most Parts.
+
+**Cabinet Label** _(export)_:
+A Cabinet's short tag (`B3`). It is unique in the export and stays the same when the Cabinet moves.
+_Avoid_: cabinet number, cabinet name
+
+**Generated Item** _(export)_:
+A piece cabinet-planner adds along a run of Cabinets, such as an end panel, toe kick or filler. It owns its own Parts, and its `label` ("Toe Kick B2") is for people only: it is not unique and not stable.
+_Avoid_: accessory, extra
+
+**Owner**:
+The Cabinet or Generated Item a Part belongs to. Progress rolls up per Owner. "Ready to assemble" applies only to Cabinets.
+
+**Owner label**:
+How an Owner is shown: the Cabinet Label for a Cabinet, or the Generated Item's `label`. Where there is room, a Cabinet also shows its Library Cabinet name ("B3 · Base door").
+
+**Part name**:
+How a Part is shown to people, always after its Owner label ("B3 · Left side"). It is the export's Part `label` when present. Otherwise it is derived from the Part path or kind ("Shelf 3"), or the path with spaces added if the key is unknown. It is display only: never unique, never a key. The Part's location (`W18-1-A #3`) identifies it.
+_Avoid_: display name, part title
+
 ### Work
 
 **Job**:
@@ -82,7 +103,7 @@ _Avoid_: profile, config
 Describes a Board or Blank that has at least one Part ticked Cut. Regenerating Layouts leaves locked Boards and Blanks as they are.
 
 **Step**:
-One tracked stage of a Part's progress: Cut, Side B, Banded or Manual ops. A Part has only the Steps that apply to it (Side B only for a Flip Part, Banded only if it has an Edgeband, Manual ops only if it has any). Each Step is ticked in the app; Blank, Board, Sheet, Cabinet and Job progress is computed from these ticks and never stored.
+One tracked stage of a Part's progress: Cut, Side B, Banded or Manual ops. A Part has only the Steps that apply to it (Side B only for a Flip Part, Banded only if it has an Edgeband, Manual ops only if it has any). Each Step is ticked in the app; Blank, Board, Sheet, Owner and Job progress is computed from these ticks and never stored.
 _Avoid_: status, stage, state
 
 **Done**:
