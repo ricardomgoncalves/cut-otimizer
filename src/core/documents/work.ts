@@ -91,10 +91,9 @@ export function partLocations(plan: Plan): Map<string, string> {
   return where;
 }
 
-/** The clamp margin a Blank was nested with. */
+/** The clamp margin a Blank was nested with (a Locked Blank keeps its own, ticket #36). */
 export function clampOf(plan: Plan, blank: Blank): number {
-  // A Blank kept from an earlier Plan may carry its own clamp margin (Locked Blanks, ticket #36).
-  return (blank as { clampMargin?: number }).clampMargin ?? plan.settings.clampMargin;
+  return blank.clampMargin ?? plan.settings.clampMargin;
 }
 
 const EDGES: PartEdge[] = ['x0', 'xL', 'y0', 'yW'];
