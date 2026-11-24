@@ -87,6 +87,35 @@ test('Download Job and Open Job move a Job to another browser', async ({ page, b
   await other.close();
 });
 
+test('a .job.json whose Plan is from an older version opens as stale until Regenerate', async ({ page, browser }, testInfo) => {
+  await createJob(page);
+  const file = JSON.parse((await downloadJob(page)).text) as {
+    plan: { sideB?: unknown; manualOps?: unknown; sheets: { boards: Record<string, unknown>[] }[] };
+  };
+  delete file.plan.sideB;
+  delete file.plan.manualOps;
+  for (const sheet of file.plan.sheets) {
+    for (const board of sheet.boards) {
+      delete board['sawParts'];
+      delete board['offcuts'];
+      delete board['cuts'];
+    }
+  }
+  const older = testInfo.outputPath('older.job.json');
+  writeFileSync(older, JSON.stringify(file));
+
+  const other = await browser.newPage();
+  await other.goto('/');
+  await other.getByLabel('Open Job').setInputFiles(older);
+  const box = other.getByRole('status', { name: 'Plan from an older version' });
+  await expect(box).toBeVisible();
+  await expect(other.getByRole('img', { name: 'Layout of W18-1-A' })).toBeVisible();
+  await box.getByRole('button', { name: 'Regenerate' }).click();
+  await expect(box).toBeHidden();
+  await expect(other.getByRole('region', { name: 'Side B' })).toBeVisible();
+  await other.close();
+});
+
 test('a .job.json from a newer version is refused', async ({ page }, testInfo) => {
   await createJob(page);
   const file = await downloadJob(page);

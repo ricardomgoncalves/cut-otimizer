@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
-import { generateJob, setPartMode } from '../src/core/job.ts';
+import { generateJob, regenerate, setPartMode } from '../src/core/job.ts';
 import {
   JOB_FORMAT,
   createJobDocument,
@@ -206,5 +206,56 @@ describe('opening a Job document', () => {
     expect(openJobDocument({ ...syntheticDocument(), rawExport: '{}' })).toEqual({
       error: expect.stringContaining('export'),
     });
+  });
+});
+
+describe('a Job saved by an older version', () => {
+  /** The synthetic Job as #29 stored it: a Plan without Saw Parts on Boards, Offcuts, cuts, Side B or Manual ops. */
+  function olderFile(): string {
+    const file = JSON.parse(toJobFile(syntheticDocument())) as {
+      plan: Record<string, unknown> & { sheets: (Record<string, unknown> & { boards: Record<string, unknown>[] })[] };
+    };
+    const without = <T extends Record<string, unknown>>(r: T, keys: string[]) =>
+      Object.fromEntries(Object.entries(r).filter(([k]) => !keys.includes(k)));
+    const plan = {
+      ...without(file.plan, ['sideB', 'manualOps']),
+      sheets: file.plan.sheets.map((sheet) => ({
+        ...without(sheet, ['sawReasons', 'unplaced', 'overflow', 'extraBoards']),
+        boards: sheet.boards.map((board) => without(board, ['sawParts', 'offcuts', 'cuts'])),
+      })),
+    };
+    return JSON.stringify({ ...file, plan });
+  }
+
+  it('opens as stale, with the missing Plan parts filled in empty, until it is regenerated', () => {
+    const read = fromJobFile(olderFile());
+    if ('error' in read) throw new Error(read.error);
+    expect(read.doc.stale).toEqual({ needsNesting: [], olderPlan: true });
+    const plan = read.doc.plan;
+    expect(plan?.sideB).toEqual([]);
+    expect(plan?.manualOps).toEqual([]);
+    for (const sheet of plan?.sheets ?? []) {
+      expect(sheet.sawReasons).toEqual({});
+      expect(sheet.unplaced).toEqual([]);
+      for (const board of sheet.boards) {
+        expect(board.sawParts).toEqual([]);
+        expect(board.offcuts).toEqual([]);
+        expect(board.cuts).toEqual([]);
+      }
+    }
+
+    const opened = openJobDocument(read.doc);
+    if ('error' in opened || !opened.job) throw new Error('must open planned');
+    const cut = opened.job.plan.sheets[0]?.boards[0]?.blanks[0]?.parts[0]?.partId ?? '';
+    const progress = { [cut]: { cut: NOW } };
+    const job = regenerate(opened.job, DEFAULT_SETTINGS, progress);
+    const saved = withJob(withProgress(read.doc, progress, NOW), job, NOW);
+    expect(saved.stale).toBeNull();
+    expect(saved.plan?.sideB.length).toBeGreaterThan(0);
+  });
+
+  it('is not marked stale when its Plan is current', () => {
+    const read = fromJobFile(toJobFile(syntheticDocument()));
+    expect('doc' in read && read.doc.stale).toBeNull();
   });
 });

@@ -388,7 +388,12 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
     sawCncOverrides,
     progress,
     plan,
-    stale: doc.plan ? { needsNesting: [...carried.filter((id) => !nesting.includes(id)), ...nesting] } : null,
+    stale: doc.plan
+      ? {
+          needsNesting: [...carried.filter((id) => !nesting.includes(id)), ...nesting],
+          ...(doc.stale?.olderPlan ? { olderPlan: true as const } : {}),
+        }
+      : null,
     idAliases: extendAliases(doc.idAliases, renames),
     handFixes,
     spares,

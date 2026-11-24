@@ -54,9 +54,11 @@ export interface JobDocument {
   reimportLog: ReimportLogEntry[];
   /**
    * Set by a re-import: the stored Plan predates the export ("Export updated, n Parts need nesting").
-   * `needsNesting` = Added and Changed (cut) Part ids. Cleared by anything that re-plans (`withJob`).
+   * `needsNesting` = Added and Changed (cut) Part ids. Also set, with `olderPlan`, when the Plan was stored
+   * by an older version and lacks what this one adds (see `readPlan`). Cleared by anything that re-plans
+   * (`withJob`).
    */
-  stale: { needsNesting: string[] } | null;
+  stale: { needsNesting: string[]; olderPlan?: true } | null;
   /**
    * The document as it was before the last re-import ("Revert last re-import"), with its own `previous`
    * dropped: one level only. Cleared by the next re-plan (`withJob`); replaced by the next re-import.
@@ -347,11 +349,53 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
   if (isRecord(progress) && Object.values(progress).every(isPartTicks)) doc.progress = progress as Progress;
   else problems.push('progress must map Part ids to Step tick times');
   const plan = raw['plan'] ?? null;
-  if (plan !== null && !(isRecord(plan) && Array.isArray(plan['sheets']))) problems.push('plan must be a Plan or null');
-  else doc.plan = plan as Plan | null;
+  if (plan === null) doc.plan = null;
+  else {
+    const read = readPlan(plan);
+    if (!read) problems.push('plan must be a Plan or null');
+    else {
+      doc.plan = read.plan;
+      // A Plan from an older version opens, but only Regenerate makes it whole again.
+      if (read.older) doc.stale = { needsNesting: doc.stale?.needsNesting ?? [], olderPlan: true };
+    }
+  }
 
   if (problems.length > 0) return { error: `This file is not a usable Job file: ${problems.join('; ')}.` };
   return { doc };
+}
+
+/**
+ * A stored Plan, with the lists later versions added filled in empty when a file from an older version
+ * lacks them (`older`): Saw Parts, Offcuts and cuts on Boards (#27), Side B files and Manual ops (#28).
+ * Such a Plan opens without crashing anything, but it is stale until regenerated. Fields this version
+ * doesn't know about ride along. Null when it isn't a Plan at all.
+ */
+function readPlan(value: unknown): { plan: Plan; older: boolean } | null {
+  if (!isRecord(value) || !Array.isArray(value['sheets'])) return null;
+  let older = false;
+  const list = (r: Record<string, unknown>, key: string): unknown[] => {
+    const v = r[key];
+    if (Array.isArray(v)) return v;
+    older = true;
+    return [];
+  };
+  const sheets: unknown[] = [];
+  for (const sheet of value['sheets']) {
+    if (!isRecord(sheet) || !Array.isArray(sheet['boards'])) return null;
+    const boards: unknown[] = [];
+    for (const board of sheet['boards']) {
+      if (!isRecord(board) || !Array.isArray(board['blanks'])) return null;
+      boards.push({ ...board, sawParts: list(board, 'sawParts'), offcuts: list(board, 'offcuts'), cuts: list(board, 'cuts') });
+    }
+    let sawReasons = sheet['sawReasons'];
+    if (!isRecord(sawReasons)) {
+      older = true;
+      sawReasons = {};
+    }
+    sheets.push({ ...sheet, boards, sawParts: list(sheet, 'sawParts'), sawReasons, unplaced: list(sheet, 'unplaced') });
+  }
+  const plan = { ...value, sheets, sideB: list(value, 'sideB'), manualOps: list(value, 'manualOps') };
+  return { plan: plan as unknown as Plan, older };
 }
 
 function isSpare(v: unknown): v is Spare {

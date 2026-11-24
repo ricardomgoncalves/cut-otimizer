@@ -644,7 +644,18 @@ export function App() {
 
       {job && (
         <>
-          {open?.doc.stale && (
+          {open?.doc.stale?.olderPlan && (
+            <div role="status" aria-label="Plan from an older version" className="stale warning-box">
+              <p>
+                This Job was saved by an older version of {APP_NAME}: its Plan lacks the Saw Parts, Offcuts, cuts, Side
+                B files or Manual ops this version adds. Regenerate it before you use its files.
+              </p>
+              <button type="button" onClick={onRegenerate}>
+                Regenerate
+              </button>
+            </div>
+          )}
+          {open?.doc.stale && (!open.doc.stale.olderPlan || open.doc.stale.needsNesting.length > 0) && (
             <div role="status" aria-label="Export updated" className="stale warning-box">
               <p>
                 Export updated, {open.doc.stale.needsNesting.length}{' '}
