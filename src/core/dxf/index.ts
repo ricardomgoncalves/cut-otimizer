@@ -47,7 +47,59 @@ interface PartFrame {
 const cutLayers = (entities: Entity[], skip: string[]) =>
   [...new Set(entities.map((e) => e.layer))].filter((l) => !skip.includes(l)).sort();
 
+/**
+ * One row of the layer legend: a cut layer used in the Job's files, by stock thickness, with how many
+ * entities sit on it. Reference layers (`REF_*`) are not listed.
+ */
+export interface LayerUse {
+  layer: string;
+  /** Stock thickness (µm) of the Parts the entities belong to. */
+  thickness: number;
+  count: number;
+  kind: 'outline' | 'drill' | 'groove' | 'pocket';
+  /** Drills only. */
+  diameter?: number;
+}
+
+/** The reference layers the Job's files use, in file order (`REF_PART` only with Side B files). */
+export function referenceLayers(plan: Plan): string[] {
+  return plan.sideB.length > 0 ? [...REF_LAYERS, REF_PART] : [...REF_LAYERS];
+}
+
+/**
+ * Every cut layer the Job's files use (Side A and Side B), by stock thickness, sorted by layer name then
+ * thickness. `thicknessOf` gives a Part's thickness (Side B files carry only Part ids).
+ */
+export function layerUsage(plan: Plan, thicknessOf: (partId: string) => number): LayerUse[] {
+  const uses = new Map<string, LayerUse>();
+  const add = (entities: Entity[], thickness: number) => {
+    for (const e of entities) {
+      if (e.layer.startsWith('REF_')) continue;
+      const key = `${e.layer} ${String(thickness)}`;
+      const use = uses.get(key);
+      if (use) {
+        use.count++;
+        continue;
+      }
+      const kind = e.type === 'circle' ? 'drill' : e.layer === OUTLINE ? 'outline' : e.layer.startsWith('GROOVE_') ? 'groove' : 'pocket';
+      uses.set(key, { layer: e.layer, thickness, count: 1, kind, ...(e.type === 'circle' ? { diameter: e.diameter } : {}) });
+    }
+  };
+  for (const sheet of plan.sheets) {
+    for (const board of sheet.boards) {
+      for (const blank of board.blanks) add(sideAEntities(blank, plan.settings.clampMargin), sheet.thickness);
+    }
+  }
+  for (const file of plan.sideB) add(sideBEntities(file), thicknessOf(file.partIds[0] ?? ''));
+  return [...uses.values()].sort((a, b) => (a.layer < b.layer ? -1 : a.layer > b.layer ? 1 : a.thickness - b.thickness));
+}
+
 function sideA(blank: Blank, clamp: number): string {
+  const entities = sideAEntities(blank, clamp);
+  return writeDxf([...REF_LAYERS, OUTLINE, ...cutLayers(entities, [...REF_LAYERS, OUTLINE])], entities);
+}
+
+function sideAEntities(blank: Blank, clamp: number): Entity[] {
   const entities: Entity[] = [
     { type: 'rect', layer: 'REF_BLANK', min: { x: 0, y: 0 }, max: { x: blank.length, y: blank.width } },
     {
@@ -62,17 +114,21 @@ function sideA(blank: Blank, clamp: number): string {
     entities.push(rect(frame, OUTLINE, { x: 0, y: 0 }, { x: part.cutLength, y: part.cutWidth }));
     entities.push(...opEntities(part.ops, frame));
   }
-  return writeDxf([...REF_LAYERS, OUTLINE, ...cutLayers(entities, [...REF_LAYERS, OUTLINE])], entities);
+  return entities;
 }
 
 /** The Flip Part's outline on REF_PART and its blind `bottom` ops, in the bottom view. No OUTLINE_THRU. */
 function sideB(file: SideBFile): string {
+  const entities = sideBEntities(file);
+  return writeDxf(['REF_V1', REF_PART, ...cutLayers(entities, [REF_PART])], entities);
+}
+
+function sideBEntities(file: SideBFile): Entity[] {
   const frame: PartFrame = { cutLength: file.cutLength, cutWidth: file.cutWidth, to: (p) => sideBPoint(file, p) };
-  const entities: Entity[] = [
+  return [
     rect(frame, REF_PART, { x: 0, y: 0 }, { x: file.cutLength, y: file.cutWidth }),
     ...opEntities(file.ops, frame),
   ];
-  return writeDxf(['REF_V1', REF_PART, ...cutLayers(entities, [REF_PART])], entities);
 }
 
 /** A placed Part's frame on its Blank. */

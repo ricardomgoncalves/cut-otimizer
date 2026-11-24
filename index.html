@@ -53,6 +53,21 @@
       .error {
         color: var(--error);
       }
+      .sheet-pages {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .sheet-page {
+        width: min(100%, 420px);
+        box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+        background: #fff;
+      }
+      .sheet-page svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
       .warning-box {
         background: var(--warn-bg);
         color: var(--warn);
