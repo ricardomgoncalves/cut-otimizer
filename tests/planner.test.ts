@@ -181,13 +181,14 @@ describe('plan', () => {
     expect(toeKick?.rotated).toBe(false);
   });
 
-  it('carries only top-face ops onto Side A', () => {
+  it('carries top-face ops onto Side A, with the through bottom drill mirrored and the blind cup left for Side B', () => {
     const result = plan(syntheticModel(), DEFAULT_SETTINGS);
     const door = allBlanks(result)
       .flatMap((b) => b.parts)
       .find((p) => p.partId === 'c1/s0.door.leaf[0]');
 
-    expect(door?.ops).toEqual([]);
+    expect(door?.ops).toEqual([{ kind: 'drill', at: { x: 649000, y: 559000 }, diameter: 5000, depth: 'through' }]);
+    expect(result.sideB.map((f) => [f.id, f.partIds, f.ops.length])).toEqual([['B1', ['c1/s0.door.leaf[0]'], 1]]);
   });
 
   it('numbers Parts by position: front row left to right, then the next row back', () => {
@@ -447,7 +448,7 @@ function randomModel(seed: number, count: number): Model {
     grain: random() < 0.5 ? 'length' : 'none',
     top: [],
     bottom: [],
-    edgeOps: [],
+    manualOps: [],
   }));
   return {
     projectName: 'Random',

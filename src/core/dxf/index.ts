@@ -1,13 +1,17 @@
 // DXF writer: Plan -> files for CAM, per the DXF layer grammar v1 (see the PRD).
 // ASCII DXF R12, mm, Z = 0, only CIRCLE and closed 4-vertex POLYLINE, nothing on layer 0.
 // Side A: top view of a Blank, origin at its front-left corner, X along the Board length.
+// Side B: bottom view of one Flip Part, origin at the Fence corner, in the orientation the Planner chose.
 // Output is a pure function of the Plan, so the same Plan gives byte-identical files.
 import type { CncOp, Point } from '../model.ts';
-import type { Blank, Placement, Plan } from '../planner/index.ts';
+import { sideBPoint, type Blank, type Placement, type Plan, type SideBFile } from '../planner/index.ts';
 import { mmToken } from '../units.ts';
 
-/** File name -> DXF text, in Run order (Sheets, Boards, Blanks). */
-export function toDxfFiles(plan: Plan): Map<string, string> {
+/**
+ * File name -> DXF text, in Run order: Side A per Blank (Sheets, Boards, Blanks), then Side B per Side B
+ * file (`<job>-B<n>.side-b.dxf`). `job` names the Job in Side B file names (the Job's short id).
+ */
+export function toDxfFiles(plan: Plan, job: string): Map<string, string> {
   const files = new Map<string, string>();
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
@@ -16,7 +20,13 @@ export function toDxfFiles(plan: Plan): Map<string, string> {
       }
     }
   }
+  for (const file of plan.sideB) files.set(sideBFileName(job, file), sideB(file));
   return files;
+}
+
+/** `<job>-B<n>.side-b.dxf`. */
+export function sideBFileName(job: string, file: Pick<SideBFile, 'id'>): string {
+  return `${job}-${file.id}.side-b.dxf`;
 }
 
 type Entity =
@@ -25,6 +35,17 @@ type Entity =
 
 const REF_LAYERS = ['REF_V1', 'REF_BLANK', 'REF_CLAMP'];
 const OUTLINE = 'OUTLINE_THRU';
+const REF_PART = 'REF_PART';
+
+/** A Part's cut size and a map from its cut frame (seen from the top) into the file. */
+interface PartFrame {
+  cutLength: number;
+  cutWidth: number;
+  to: (p: Point) => Point;
+}
+
+const cutLayers = (entities: Entity[], skip: string[]) =>
+  [...new Set(entities.map((e) => e.layer))].filter((l) => !skip.includes(l)).sort();
 
 function sideA(blank: Blank, clamp: number): string {
   const entities: Entity[] = [
@@ -36,59 +57,63 @@ function sideA(blank: Blank, clamp: number): string {
       max: { x: blank.length - clamp, y: blank.width - clamp },
     },
   ];
-  for (const part of blank.parts) entities.push(...partEntities(part));
-
-  const cutLayers = [...new Set(entities.map((e) => e.layer))]
-    .filter((l) => !REF_LAYERS.includes(l) && l !== OUTLINE)
-    .sort();
-  const layers = [...REF_LAYERS, OUTLINE, ...cutLayers];
-  return writeDxf(layers, entities);
+  for (const part of blank.parts) {
+    const frame = placementFrame(part);
+    entities.push(rect(frame, OUTLINE, { x: 0, y: 0 }, { x: part.cutLength, y: part.cutWidth }));
+    entities.push(...opEntities(part.ops, frame));
+  }
+  return writeDxf([...REF_LAYERS, OUTLINE, ...cutLayers(entities, [...REF_LAYERS, OUTLINE])], entities);
 }
 
-/** A Part's outline and Side A ops, moved from its cut frame into the Blank frame. */
-function partEntities(part: Placement): Entity[] {
+/** The Flip Part's outline on REF_PART and its blind `bottom` ops, in the bottom view. No OUTLINE_THRU. */
+function sideB(file: SideBFile): string {
+  const frame: PartFrame = { cutLength: file.cutLength, cutWidth: file.cutWidth, to: (p) => sideBPoint(file, p) };
+  const entities: Entity[] = [
+    rect(frame, REF_PART, { x: 0, y: 0 }, { x: file.cutLength, y: file.cutWidth }),
+    ...opEntities(file.ops, frame),
+  ];
+  return writeDxf(['REF_V1', REF_PART, ...cutLayers(entities, [REF_PART])], entities);
+}
+
+/** A placed Part's frame on its Blank. */
+function placementFrame(part: Placement): PartFrame {
   // Turned Parts are rotated 90° counter-clockwise: the Part's X runs along the Blank's +Y.
-  const toBlank = (p: Point): Point =>
+  const to = (p: Point): Point =>
     part.rotated
       ? { x: part.x + (part.cutWidth - p.y), y: part.y + p.x }
       : { x: part.x + p.x, y: part.y + p.y };
-  const rect = (layer: string, a: Point, b: Point): Entity => {
-    const [p, q] = [toBlank(a), toBlank(b)];
-    return {
-      type: 'rect',
-      layer,
-      min: { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y) },
-      max: { x: Math.max(p.x, q.x), y: Math.max(p.y, q.y) },
-    };
-  };
-
-  const entities: Entity[] = [rect(OUTLINE, { x: 0, y: 0 }, { x: part.cutLength, y: part.cutWidth })];
-  for (const op of part.ops) {
-    const entity = opEntity(op, part, rect, toBlank);
-    if (entity) entities.push(entity);
-  }
-  return entities;
+  return { cutLength: part.cutLength, cutWidth: part.cutWidth, to };
 }
 
-function opEntity(
-  op: CncOp,
-  part: Placement,
-  rect: (layer: string, a: Point, b: Point) => Entity,
-  toBlank: (p: Point) => Point,
-): Entity | null {
+/** A rectangle given by two corners in the Part's cut frame. */
+function rect(frame: PartFrame, layer: string, a: Point, b: Point): Entity {
+  const [p, q] = [frame.to(a), frame.to(b)];
+  return {
+    type: 'rect',
+    layer,
+    min: { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y) },
+    max: { x: Math.max(p.x, q.x), y: Math.max(p.y, q.y) },
+  };
+}
+
+function opEntities(ops: CncOp[], frame: PartFrame): Entity[] {
+  return ops.flatMap((op) => opEntity(op, frame) ?? []);
+}
+
+function opEntity(op: CncOp, part: PartFrame): Entity | null {
   switch (op.kind) {
     case 'drill': {
       const depth = op.depth === 'through' ? 'THRU' : `Z${mmToken(op.depth)}`;
       return {
         type: 'circle',
         layer: `DRILL_D${mmToken(op.diameter)}_${depth}`,
-        centre: toBlank(op.at),
+        centre: part.to(op.at),
         diameter: op.diameter,
       };
     }
     case 'groove': {
       // Axis-aligned slot, width centred on the from-to line, clipped to the cut outline.
-      // (Diagonal grooves don't occur in v1 exports; they would need a Manual op, ticket #28.)
+      // (Diagonal grooves are Manual ops: Import keeps them out of `top` and `bottom`.)
       const half = op.width / 2;
       const alongX = op.from.y === op.to.y;
       const lo: Point = alongX
@@ -100,12 +125,12 @@ function opEntity(
       const min = { x: Math.max(lo.x, 0), y: Math.max(lo.y, 0) };
       const max = { x: Math.min(hi.x, part.cutLength), y: Math.min(hi.y, part.cutWidth) };
       if (min.x >= max.x || min.y >= max.y) return null;
-      return rect(`GROOVE_W${mmToken(op.width)}_Z${mmToken(op.depth)}`, min, max);
+      return rect(part, `GROOVE_W${mmToken(op.width)}_Z${mmToken(op.depth)}`, min, max);
     }
     case 'pocket': {
       const min = { x: op.centre.x - op.length / 2, y: op.centre.y - op.width / 2 };
       const max = { x: op.centre.x + op.length / 2, y: op.centre.y + op.width / 2 };
-      return rect(`POCKET_Z${mmToken(op.depth)}`, min, max);
+      return rect(part, `POCKET_Z${mmToken(op.depth)}`, min, max);
     }
   }
 }

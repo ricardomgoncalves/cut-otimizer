@@ -62,10 +62,33 @@ export interface Part {
   grain: 'length' | 'none';
   /** `top`-face ops, moved from the finished frame into the cut frame. */
   top: CncOp[];
-  /** `bottom`-face ops in the cut frame (seen from the top, like `top`). Not on Side A. */
+  /**
+   * Blind `bottom`-face ops in the cut frame (seen from the top, like `top`). Not on Side A: the ones whose
+   * kind isn't set to manual in Machine settings make this a Flip Part (the Planner decides, ticket #28).
+   * Through `bottom` ops are mirrored into `top` on import.
+   */
   bottom: CncOp[];
-  /** Edge-face ops (`x0`, `xL`, `y0`, `yW`), kept verbatim from the export. Manual ops. */
-  edgeOps: ExportOp[];
+  /** Ops no file can carry: edge-face ops and ops the DXF grammar can't draw. Done by hand. */
+  manualOps: ManualOp[];
+}
+
+/** A Part face, as the export names it. */
+export type Face = ExportOp['face'];
+
+/**
+ * An op done by hand, on paper only: an edge-face op (`edge`), a `bottom` op whose kind is set to manual
+ * in Machine settings (`manualKind`, added by the Planner), or something the DXF grammar can't draw, such
+ * as a mitred end or a diagonal groove (`notDrawable`).
+ */
+export interface ManualOp {
+  reason: 'edge' | 'manualKind' | 'notDrawable';
+  face: Face;
+  /**
+   * Spelled out for the PDF and the label, in mm ("Drill Ø8 × 30 deep on x0 at y 260, z 9"). Edge-face ops
+   * and mitres use the export's finished frame (they're done after banding); `bottom` and `top` ops use the
+   * cut frame, measured from the cut edges like Side B.
+   */
+  text: string;
 }
 
 export interface Model {

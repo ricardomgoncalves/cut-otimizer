@@ -18,10 +18,13 @@
 //   Blanks lettered in saw order (rip 1, crosscuts 1a, 1b…, rip 2…). `#n` within a Blank goes by position:
 //   front row left to right, then the next row back (sort by y, then x).
 // - Blanks are never rotated: Board length runs along X. Only `grain: none` Parts may rotate.
-// - Only `top` ops go to Side A (Flip Parts are #28).
+// - Only `top` ops go to Side A. Flip Parts, Side B files and Manual ops: side-b.ts (#28).
 import { MaxRectsBin, PACKING_LOGIC, Rectangle } from 'maxrects-packer';
 import type { CncOp, Model, Part, Sheet } from '../model.ts';
 import { edgeTrimFor, type Settings } from '../settings.ts';
+import { sideB, type JobManualOp, type SideBFile } from './side-b.ts';
+
+export { sideBPoint, type Edge, type JobManualOp, type QuarterTurns, type SideBFile } from './side-b.ts';
 
 /** A Part nested on a Blank. Coordinates are µm in the Blank frame (origin front-left). */
 export interface Placement {
@@ -123,6 +126,10 @@ export interface Plan {
   settings: Settings;
   /** In Run order: grouped by thickness, groups and Sheets in export order. */
   sheets: SheetPlan[];
+  /** Side B files, in Run order of their first Part (ticket #28). */
+  sideB: SideBFile[];
+  /** Every Manual op of the Job, by Part in Run order. */
+  manualOps: JobManualOp[];
 }
 
 export type PartMode = 'saw' | 'cnc';
@@ -146,17 +153,30 @@ export interface PartRule {
 
 /** Plans every Sheet of the model. Pure and deterministic. */
 export function plan(model: Model, settings: Settings, prior: PlanPrior = {}): Plan {
-  return {
-    settings,
-    sheets: runOrder(model.sheets).map((sheet) =>
-      planSheet(
-        sheet,
-        model.parts.filter((p) => p.sheetId === sheet.id),
-        settings,
-        prior.sawCnc ?? {},
-      ),
+  const sheets = runOrder(model.sheets).map((sheet) =>
+    planSheet(
+      sheet,
+      model.parts.filter((p) => p.sheetId === sheet.id),
+      settings,
+      prior.sawCnc ?? {},
     ),
-  };
+  );
+  const { files, manualOps } = sideB(model, settings, partRunOrder(sheets));
+  return { settings, sheets, sideB: files, manualOps };
+}
+
+/**
+ * Every Part id in Run order: per Sheet and Board, the Blanks' Parts (letter, then `#n`), then the Board's
+ * Saw Parts; Saw Parts too big for any Board last in their Sheet.
+ */
+function partRunOrder(sheets: SheetPlan[]): string[] {
+  return sheets.flatMap((sheet) => [
+    ...sheet.boards.flatMap((board) => [
+      ...board.blanks.flatMap((blank) => blank.parts.map((p) => p.partId)),
+      ...board.sawParts.map((p) => p.partId),
+    ]),
+    ...sheet.unplaced,
+  ]);
 }
 
 /** The Saw / CNC rule for one Part of the model. */

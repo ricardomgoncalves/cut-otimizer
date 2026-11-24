@@ -33,17 +33,17 @@ describe('Job settings snapshot', () => {
   it("doesn't change its DXFs when the global settings change, until it is regenerated", () => {
     const global: Settings = { ...DEFAULT_SETTINGS };
     const job = generateJob(syntheticModel(), global);
-    const before = toDxfFiles(job.plan);
+    const before = toDxfFiles(job.plan, 'J1');
 
     // The maker edits the global settings afterwards.
     const edited: Settings = { ...global, clampMargin: 100000 };
     expect(snapshotChanges(job, edited)).toEqual(['clampMargin']);
-    expect(toDxfFiles(job.plan)).toEqual(before);
+    expect(toDxfFiles(job.plan, 'J1')).toEqual(before);
 
     const regenerated = regenerate(job, edited);
     expect(snapshotChanges(regenerated, edited)).toEqual([]);
-    expect(toDxfFiles(regenerated.plan).get('W18-1-A.side-a.dxf')).not.toEqual(before.get('W18-1-A.side-a.dxf'));
-    expect(toDxfFiles(regenerated.plan).get('W18-1-A.side-a.dxf')).toContain('\n100\n');
+    expect(toDxfFiles(regenerated.plan, 'J1').get('W18-1-A.side-a.dxf')).not.toEqual(before.get('W18-1-A.side-a.dxf'));
+    expect(toDxfFiles(regenerated.plan, 'J1').get('W18-1-A.side-a.dxf')).toContain('\n100\n');
   });
 });
 
@@ -62,7 +62,11 @@ describe('Sheet codes', () => {
 
     expect(sheetCode(result.job, W18(model))).toBe('WH18');
     expect(blankIds(result.job)).toEqual(['WH18-1-A', 'O16-1-A']);
-    expect([...toDxfFiles(result.job.plan).keys()]).toEqual(['WH18-1-A.side-a.dxf', 'O16-1-A.side-a.dxf']);
+    expect([...toDxfFiles(result.job.plan, 'J1').keys()]).toEqual([
+      'WH18-1-A.side-a.dxf',
+      'O16-1-A.side-a.dxf',
+      'J1-B1.side-b.dxf',
+    ]);
   });
 
   it('re-plan with the snapshot, not with newer global settings', () => {

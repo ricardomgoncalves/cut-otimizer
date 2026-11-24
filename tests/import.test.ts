@@ -74,28 +74,68 @@ describe('importExport', () => {
   });
 
   it('moves face ops into the cut frame, off the x0 and y0 Edgebands', () => {
-    // The door is banded on all four edges with 1 mm ABS; its through drill is at (650, 560) mm
-    // in the finished frame, so (649, 559) mm on the cut piece.
+    // The door is banded on all four edges with 1 mm ABS; its hinge cup is at (100, 22.5) mm
+    // in the finished frame, so (99, 21.5) mm on the cut piece.
     const { model } = importExport(readFixture('synthetic.parts.json'));
     const door = model?.parts.find((p) => p.id === 'c1/s0.door.leaf[0]');
 
     expect(door?.cutLength).toBe(698000);
-    expect(door?.top).toEqual([]);
-    expect(door?.bottom[0]).toEqual({
-      kind: 'drill',
-      at: { x: 649000, y: 559000 },
-      diameter: 5000,
-      depth: 'through',
-    });
-    expect(door?.bottom[1]).toMatchObject({ diameter: 35000, depth: 13000 });
+    expect(door?.bottom).toEqual([{ kind: 'drill', at: { x: 99000, y: 21500 }, diameter: 35000, depth: 13000 }]);
   });
 
-  it('warns about bottom-face ops (no Flip Parts yet) and edge-face ops', () => {
+  it('mirrors a through bottom op onto top, where Side A runs it', () => {
+    // The door's through Ø5 drill is at (650, 560) mm on the bottom face: the same hole seen from the top.
+    const { model } = importExport(readFixture('synthetic.parts.json'));
+    const door = model?.parts.find((p) => p.id === 'c1/s0.door.leaf[0]');
+
+    expect(door?.top).toEqual([{ kind: 'drill', at: { x: 649000, y: 559000 }, diameter: 5000, depth: 'through' }]);
+  });
+
+  it('makes edge-face ops Manual ops, spelled out in the finished frame', () => {
+    const { model } = importExport(readFixture('synthetic.parts.json'));
+    const shelf = model?.parts.find((p) => p.id === 'c1/s0.shelf[0]');
+
+    expect(shelf?.top).toEqual([]);
+    expect(shelf?.bottom).toEqual([]);
+    expect(shelf?.manualOps).toEqual([{ reason: 'edge', face: 'x0', text: 'Drill Ø8 × 30 deep on x0 at y 260, z 9' }]);
+  });
+
+  it('makes ops the DXF grammar cannot draw Manual ops: a mitre, a diagonal groove', () => {
+    const file = readFixture('synthetic.parts.json') as { parts: Record<string, unknown>[] };
+    const toeKick = file.parts[4];
+    if (!toeKick) throw new Error('fixture has a toe kick');
+    toeKick['ends'] = { xL: { mitre: { angle: 45, longFace: 'top' } } };
+    toeKick['ops'] = [
+      {
+        type: 'groove',
+        face: 'top',
+        from: { x: 10000, y: 10000 },
+        to: { x: 110000, y: 60500 },
+        width: 4000,
+        depth: 5000,
+        source: { kind: 'op', index: 0 },
+      },
+    ];
+
+    const { model } = importExport(file);
+    const part = model?.parts[4];
+
+    expect(part?.top).toEqual([]);
+    expect(part?.manualOps).toEqual([
+      { reason: 'notDrawable', face: 'xL', text: 'Mitre the xL end 45° (long point on top)' },
+      {
+        reason: 'notDrawable',
+        face: 'top',
+        text: 'Groove 4 wide × 5 deep on top from x 10, y 10 to x 110, y 60.5',
+      },
+    ]);
+  });
+
+  it('warns about Parts with Manual ops', () => {
     const { issues } = importExport(readFixture('synthetic.parts.json'));
 
     expect(issues.filter((i) => i.kind === 'warning')).toEqual([
-      expect.objectContaining({ kind: 'warning', partId: 'c1/s0.shelf[0]' }),
-      expect.objectContaining({ kind: 'warning', partId: 'c1/s0.door.leaf[0]' }),
+      { kind: 'warning', partId: 'c1/s0.shelf[0]', message: '1 Manual op, not in any file: done by hand' },
     ]);
   });
 

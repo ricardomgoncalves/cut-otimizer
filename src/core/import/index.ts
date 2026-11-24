@@ -2,7 +2,8 @@
 // Validates against the vendored v1 schema (ajv), then builds Sheets, Owners and Parts.
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../../vendor/parts-export/parts-export.v1.schema.json';
-import type { CncOp, Model, Owner, Part, Point, Sheet } from '../model.ts';
+import { describeCncOp, describeExportOp, mitreOp } from '../manual-ops.ts';
+import type { CncOp, ManualOp, Model, Owner, Part, Point, Sheet } from '../model.ts';
 import { mmToken } from '../units.ts';
 import { fullPartName, nameParts } from './names.ts';
 import type {
@@ -85,13 +86,30 @@ function buildModel(file: PartsExport): ImportResult {
     };
     const top: CncOp[] = [];
     const bottom: CncOp[] = [];
-    const edgeOps: ExportOp[] = [];
-    for (const op of p.ops) {
-      if (op.face === 'top') top.push(toCncOp(op, offset));
-      else if (op.face === 'bottom') bottom.push(toCncOp(op, offset));
-      else edgeOps.push(op);
+    const manualOps: ManualOp[] = [];
+    for (const end of ['x0', 'xL'] as const) {
+      const mitre = p.ends?.[end]?.mitre;
+      if (mitre) manualOps.push(mitreOp(end, mitre.angle, mitre.longFace));
     }
-    issues.push(...partWarnings(p, bottom.length, edgeOps.length));
+    for (const op of p.ops) {
+      if (op.face !== 'top' && op.face !== 'bottom') {
+        manualOps.push({ reason: 'edge', face: op.face, text: describeExportOp(op) });
+        continue;
+      }
+      const cnc = toCncOp(op, offset);
+      if (!drawable(cnc)) {
+        manualOps.push({ reason: 'notDrawable', face: op.face, text: describeCncOp(cnc, op.face) });
+      } else if (op.face === 'top' || (cnc.kind === 'drill' && cnc.depth === 'through')) {
+        // A through op is the same hole seen from either face (same x, y in the Part frame): Side A runs it.
+        top.push(cnc);
+      } else {
+        bottom.push(cnc);
+      }
+    }
+    if (manualOps.length > 0) {
+      const count = manualOps.length === 1 ? '1 Manual op' : `${String(manualOps.length)} Manual ops`;
+      issues.push({ kind: 'warning', partId: p.id, message: `${count}, not in any file: done by hand` });
+    }
     return {
       id: p.id,
       name: p.name,
@@ -105,7 +123,7 @@ function buildModel(file: PartsExport): ImportResult {
       grain: p.grain,
       top,
       bottom,
-      edgeOps,
+      manualOps,
     };
   });
 
@@ -135,23 +153,12 @@ function exportLabel(p: ExportPart): { label?: string } {
   return typeof label === 'string' && label !== '' ? { label } : {};
 }
 
-function partWarnings(p: ExportPart, bottom: number, edgeOps: number): ImportIssue[] {
-  const issues: ImportIssue[] = [];
-  if (bottom > 0) {
-    issues.push({
-      kind: 'warning',
-      partId: p.id,
-      message: `${String(bottom)} bottom-face op(s) ignored: Flip Parts are not supported yet`,
-    });
-  }
-  if (edgeOps > 0) {
-    issues.push({
-      kind: 'warning',
-      partId: p.id,
-      message: `${String(edgeOps)} edge-face op(s) are Manual ops and are not in any file`,
-    });
-  }
-  return issues;
+/**
+ * Whether the DXF grammar can draw an op: drills are circles; grooves and pockets are axis-aligned closed
+ * rectangles. A diagonal groove can't be drawn (pocket corner radii are ignored).
+ */
+function drawable(op: CncOp): boolean {
+  return op.kind !== 'groove' || op.from.x === op.to.x || op.from.y === op.to.y;
 }
 
 /** Moves an export op from the finished frame into the cut frame (banding off `x0`/`y0`). */
