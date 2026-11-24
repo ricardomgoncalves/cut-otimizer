@@ -47,7 +47,7 @@ _Avoid_: work order, order of work, cut order
 A short code for a Sheet, derived from its material and thickness and editable (`W18` for White melamine 18). Used in Blank ids.
 
 **Saw Part**:
-A Part cut straight from a Board in the Breakdown rather than on the CNC. A Part bigger than the usable bed is always a Saw Part; a Part without ops may be made one by hand.
+A Part cut straight from a Board in the Breakdown rather than on the CNC. A Part bigger than the usable bed is always a Saw Part. A Part narrower than Min CNC width with no CNC ops becomes one automatically; any other Part can be switched between Saw and CNC by hand.
 _Avoid_: manual part
 
 **Offcut**:
@@ -75,7 +75,7 @@ The square stop fixed to the bed that a Flip Part is pushed into for Side B. It 
 _Avoid_: jig, registration
 
 **Machine settings**:
-Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf and edge trim. A Job keeps a snapshot of them from when its Layouts were generated.
+Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf, edge trim and Min CNC width (the shortest cut side a Part may have to be nested without a warning). A Job keeps a snapshot of them from when its Layouts were generated.
 _Avoid_: profile, config
 
 **Locked**:
