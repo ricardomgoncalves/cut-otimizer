@@ -218,9 +218,12 @@ export function wouldUnlock(job: JobView, progress: Progress, partId: string, st
 export interface ReprintSelection {
   /** Board ids (`W18-1`) of unlocked Boards: their saw pages. */
   boards: string[];
-  /** Ids of unlocked Blanks: their Side A pages and DXFs. */
+  /** Ids of unlocked Blanks (also those on a Locked Board): their Side A pages and DXFs. */
   blanks: string[];
-  /** Parts not on a Locked Board and not Done (incl. Saw Parts on no Board): their labels and rows. */
+  /**
+   * Parts not Done that are on no Locked Blank and aren't Saw Parts of a Locked Board (incl. Saw Parts on
+   * no Board): their labels and rows.
+   */
   parts: string[];
   /** Side B files holding any of those Parts. */
   sideB: string[];
@@ -233,9 +236,17 @@ export interface ReprintSelection {
 export function reprintSelection(job: JobView, progress: Progress): ReprintSelection {
   const out: ReprintSelection = { boards: [], blanks: [], parts: [], sideB: [] };
   const keep = (ids: readonly string[]) => ids.filter((id) => !isDone(job, progress, id));
+  const cut = (id: string) => isCut(progress, id);
   for (const sheet of job.plan.sheets) {
     for (const board of sheet.boards) {
-      if (boardLocked(board, (id) => isCut(progress, id))) continue;
+      // A Locked Board keeps its Breakdown (saw page, Saw Parts), but its uncut Blanks are nested again.
+      if (boardLocked(board, cut)) {
+        for (const blank of board.blanks.filter((b) => !blankLocked(b, cut))) {
+          out.blanks.push(blank.id);
+          out.parts.push(...keep(blankParts(blank)));
+        }
+        continue;
+      }
       out.boards.push(boardId(sheet, board));
       out.blanks.push(...board.blanks.map((b) => b.id));
       out.parts.push(...keep(boardParts(board)));

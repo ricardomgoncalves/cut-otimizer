@@ -5,11 +5,13 @@
 //
 // Locked Boards and Blanks (those with a Part ticked Cut, so derived from the Job's progress) survive every
 // re-plan here: `regenerate`, the Saw / CNC toggle and Sheet code edits pass the stored Plan and the Cut
-// Part ids to the Planner, which keeps them exactly as they are.
+// Part ids to the Planner, which keeps Locked Blanks exactly as they are and Locked Boards' Breakdowns.
 import type { Model } from './model.ts';
 import {
+  blankLocked,
   boardLocked,
   discardOffcut,
+  isLive,
   livePartIds,
   partRule,
   plan,
@@ -134,8 +136,8 @@ export function setOffcutDiscarded(job: Job, offcutId: string, discarded: boolea
 
 /**
  * Sets a Part's Saw / CNC toggle and re-plans with the Job's own snapshot, keeping Locked Boards. Choosing
- * the Part's automatic mode removes the stored choice. A Part bigger than the usable bed, or on a Locked
- * Board, can't be toggled.
+ * the Part's automatic mode removes the stored choice. A Part bigger than the usable bed, on a Locked
+ * Blank or a Saw Part of a Locked Board can't be toggled.
  */
 export function setPartMode(
   job: Job,
@@ -146,8 +148,14 @@ export function setPartMode(
   const rule = partRule(job.model, job.settings, partId);
   if (!rule) return { error: `There is no Part ${partId} in this Job.` };
   if (rule.oversize) return { error: 'This Part is bigger than the usable bed, so it is always cut on the saw.' };
-  const locked = lockedBoards(job, progress).find(({ board }) => livePartIds(board).includes(partId));
-  if (locked) return { error: `This Part is on Locked Board ${locked.id}, so it stays where it is.` };
+  const isCut = (id: string) => progress[id]?.cut !== undefined;
+  for (const { id, board } of lockedBoards(job, progress)) {
+    if (board.sawParts.some((p) => isLive(p) && p.partId === partId)) {
+      return { error: `This Part is on Locked Board ${id}, so it stays where it is.` };
+    }
+    const blank = board.blanks.find((b) => blankLocked(b, isCut) && b.parts.some((p) => isLive(p) && p.partId === partId));
+    if (blank) return { error: `This Part is on Locked Blank ${blank.id}, so it stays where it is.` };
+  }
   const sawCnc = Object.fromEntries(Object.entries(job.sawCnc).filter(([id]) => id !== partId));
   if (mode !== rule.auto) sawCnc[partId] = mode;
   return { job: planJob(job.model, job.settings, job.sheetCodes, sawCnc, job.plan, progress) };

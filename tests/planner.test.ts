@@ -51,7 +51,7 @@ function expectInvariants(
   model: Model,
   result: Plan,
   planSettings: Settings,
-  locked?: { settings: Settings; boards: Set<string> },
+  locked?: { settings: Settings; boards: Set<string>; blanks: Set<string> },
 ) {
 
   // Every Part placed exactly once, as a CNC Part or a Saw Part, or waiting for a Board. A Remake Part
@@ -85,8 +85,9 @@ function expectInvariants(
   for (const sheet of result.sheets) {
     for (const board of sheet.boards) {
       // A Locked Board was planned with the earlier settings and is kept as it was.
+      // A Locked Board keeps the Breakdown it was planned with, and a Locked Blank its Layout; an unlocked
+      // Blank on a Locked Board keeps its outline but is nested again with the new settings.
       const settings = locked?.boards.has(`${sheet.sheetId}/${String(board.number)}`) ? locked.settings : planSettings;
-      const clamp = settings.clampMargin;
       const trim = settings.edgeTrimBySheet[sheet.sheetId] ?? settings.edgeTrim;
       // Blanks within the bed; every saw piece within the trimmed Board, with kerf between saw pieces.
       for (const blank of board.blanks) {
@@ -134,6 +135,8 @@ function expectInvariants(
       });
 
       for (const blank of board.blanks) {
+        const nested = locked?.blanks.has(blank.id) ? locked.settings : planSettings;
+        const clamp = nested.clampMargin;
         const rects = footprints(blank);
         // Parts inside the Blank minus the clamp margin on all four edges.
         for (const r of rects) {
@@ -144,12 +147,12 @@ function expectInvariants(
         }
         // Narrow Parts on the CNC are flagged.
         for (const p of blank.parts) {
-          expect(p.narrow, p.partId).toBe(Math.min(p.cutLength, p.cutWidth) < settings.minCncWidth);
+          expect(p.narrow, p.partId).toBe(Math.min(p.cutLength, p.cutWidth) < nested.minCncWidth);
         }
         // No overlaps, with room for the bit between Parts.
         rects.forEach((a, i) => {
           for (const b of rects.slice(i + 1)) {
-            expect(overlaps(a, b, settings.bitDiameter), `${a.partId} overlaps ${b.partId}`).toBe(false);
+            expect(overlaps(a, b, nested.bitDiameter), `${a.partId} overlaps ${b.partId}`).toBe(false);
           }
         });
       }
@@ -483,6 +486,7 @@ describe('Locked Boards and Blanks', () => {
     bedLength: 1250000,
   };
 
+  const outline = (b: Blank) => ({ id: b.id, letter: b.letter, x: b.x, y: b.y, length: b.length, width: b.width, from: b.from });
   const boardParts = (b: Board) => [...b.blanks.flatMap((x) => x.parts.map((p) => p.partId)), ...b.sawParts.map((p) => p.partId)];
 
   /** Ticks Cut on a seeded sample of the Parts on Boards. */
@@ -507,12 +511,19 @@ describe('Locked Boards and Blanks', () => {
       const locked = lockedBoards(before, cut);
       const after = plan(model, changed, { plan: before, cut });
 
+      const lockedBlanks = new Set<string>();
       for (const { sheetId, board } of locked) {
         const kept = after.sheets.find((s) => s.sheetId === sheetId)?.boards.find((b) => b.number === board.number);
-        expect(kept).toEqual(board);
+        // The Breakdown stays: Board number, Blank outlines and ids, Saw Parts, Offcuts and cuts.
+        expect({ ...kept, blanks: kept?.blanks.map(outline) }).toEqual({ ...board, blanks: board.blanks.map(outline) });
+        // A Blank with a Part ticked Cut stays exactly as it was.
+        for (const blank of board.blanks.filter((b) => b.parts.some((p) => cut.includes(p.partId)))) {
+          lockedBlanks.add(blank.id);
+          expect(kept?.blanks.find((b) => b.id === blank.id)).toEqual(blank);
+        }
       }
       const lockedKeys = new Set(locked.map((l) => `${l.sheetId}/${String(l.board.number)}`));
-      expectInvariants(model, after, changed, { settings: DEFAULT_SETTINGS, boards: lockedKeys });
+      expectInvariants(model, after, changed, { settings: DEFAULT_SETTINGS, boards: lockedKeys, blanks: lockedBlanks });
       expectRunOrder(model, after, lockedKeys);
     },
   );
@@ -526,7 +537,8 @@ describe('Locked Boards and Blanks', () => {
     const after = plan(model, changed, { plan: before, cut: [partId] });
     const sheet = after.sheets[0];
 
-    expect(sheet?.boards[0]).toEqual(first);
+    expect(sheet?.boards[0]?.blanks[0]).toEqual(first.blanks[0]);
+    expect(sheet?.boards[0]?.blanks.map(outline)).toEqual(first.blanks.map(outline));
     const lockedIds = new Set(first.blanks.map((b) => b.id));
     const newBoards = sheet?.boards.slice(1) ?? [];
     expect(newBoards.length).toBeGreaterThan(0);
@@ -561,10 +573,34 @@ describe('Locked Boards and Blanks', () => {
     const before = plan(model, DEFAULT_SETTINGS);
     const after = plan(model, changed, { plan: before, cut: ['c1/leftSide'], sawCnc: { 'c1/s0.rail[1]': 'cnc' } });
 
-    expect(after.sheets[0]?.boards).toEqual(before.sheets[0]?.boards);
+    const [kept] = after.sheets[0]?.boards ?? [];
+    const [old] = before.sheets[0]?.boards ?? [];
+    expect(kept?.sawParts).toEqual(old?.sawParts);
+    expect(kept?.cuts).toEqual(old?.cuts);
+    expect(kept?.blanks.map(outline)).toEqual(old?.blanks.map(outline));
     expect(after.sheets[0]?.sawParts).toEqual(before.sheets[0]?.sawParts);
     expect(after.sheets[0]?.sawReasons).toEqual(before.sheets[0]?.sawReasons);
     expect(after.sheets[1]?.boards[0]).not.toEqual(before.sheets[1]?.boards[0]);
+  });
+
+  it('keeps a Locked Board’s Breakdown but nests its uncut Blanks again, inside their outlines', () => {
+    const model = randomModel(5, 60);
+    const before = plan(model, DEFAULT_SETTINGS);
+    const first = before.sheets[0]?.boards[0];
+    const [cutBlank, uncut] = first?.blanks ?? [];
+    const partId = cutBlank?.parts[0]?.partId;
+    if (!first || !cutBlank || !uncut || !partId) throw new Error('needs a W18 Board with two Blanks');
+    const after = plan(model, changed, { plan: before, cut: [partId] }).sheets[0]?.boards[0];
+
+    expect(after?.number).toBe(first.number);
+    expect(after?.cuts).toEqual(first.cuts);
+    expect(after?.blanks[0]).toEqual(cutBlank);
+    const renested = after?.blanks[1];
+    expect(renested && outline(renested)).toEqual(outline(uncut));
+    expect(renested?.clampMargin).toBe(changed.clampMargin);
+    expect(renested?.parts).not.toEqual(uncut.parts);
+    // Its Parts are back inside it where they fit with the wider clamp margin.
+    expect(renested?.parts.length).toBeGreaterThan(0);
   });
 
   it('records the clamp margin each Blank was nested with', () => {

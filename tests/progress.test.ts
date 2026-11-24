@@ -182,8 +182,19 @@ describe('Reprints after a regenerate', () => {
   });
 
   it('leave out Locked Boards and Blanks, the Parts on them and Done Parts, in Run order', () => {
+    const doorCut = apply(job, {}, { kind: 'tick', partId: DOOR, step: 'cut', at: T1 });
+    const shelfDone = tickAll(doorCut, SHELF);
+    expect(reprintSelection(job, shelfDone)).toEqual({ boards: ['O16-1'], blanks: ['O16-1-A'], parts: [TOE], sideB: [] });
+  });
+
+  it('keep an uncut Blank of a Locked Board: it is nested again, though its Board’s saw page stays', () => {
     const railCut = apply(job, {}, { kind: 'tick', partId: RAIL, step: 'cut', at: T1 });
-    expect(reprintSelection(job, railCut)).toEqual({ boards: ['O16-1'], blanks: ['O16-1-A'], parts: [TOE], sideB: [] });
+    expect(reprintSelection(job, railCut)).toEqual({
+      boards: ['O16-1'],
+      blanks: ['W18-1-A', 'O16-1-A'],
+      parts: [DOOR, SHELF, TOE],
+      sideB: ['B1'],
+    });
   });
 });
 

@@ -745,7 +745,7 @@ export function App() {
                 {changed.map((k) => SETTING_LABELS[k]).join(', ')}). Its files keep the old settings until
                 you regenerate it.
                 {rolled?.boards.some((b) => b.locked) &&
-                  ' Locked Boards and Blanks (with a Part ticked Cut) stay exactly as they are; only the rest is planned again.'}
+                  ' Locked Blanks (with a Part ticked Cut) stay exactly as they are, and Locked Boards keep their Breakdown; only the rest is planned again.'}
               </p>
               <button type="button" onClick={onRegenerate}>
                 Regenerate

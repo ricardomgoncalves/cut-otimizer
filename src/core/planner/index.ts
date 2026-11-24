@@ -19,11 +19,14 @@
 //   front row left to right, then the next row back (sort by y, then x).
 // - Blanks are never rotated: Board length runs along X. Only `grain: none` Parts may rotate.
 // - Only `top` ops go to Side A. Flip Parts, Side B files and Manual ops: side-b.ts (#28).
-// - Locked Boards (#36; PRD 3.7, 5.5): a Board of `prior.plan` with any Part ticked Cut (`prior.cut`) is
-//   kept exactly as it is (geometry, number, Blank ids, `#n`, its Saw Parts with their reasons), with every
-//   Part on it. Only the other Parts are planned, onto new Boards numbered after the highest Locked Board,
-//   so new Blanks never reuse a Locked id and sort to the end of their Sheet. Each Blank records the clamp
-//   margin it was nested with, so a Locked Blank's DXF doesn't change when the margin does.
+// - Locked Boards and Blanks (#36; PRD 3.7, 5.5): a Board of `prior.plan` with any Part ticked Cut
+//   (`prior.cut`) keeps its Breakdown exactly as it is (geometry, number, Blank outlines and ids, its Saw
+//   Parts with their reasons, Offcuts and cuts). A Blank on it with a Part ticked Cut is Locked too and kept
+//   with every Part on it. The Board's other Blanks keep their outlines, but their Parts are laid out again
+//   with the current settings (`relayBlank`). Only the other Parts are planned, onto new Boards numbered
+//   after the highest Locked Board, so new Blanks never reuse a Locked id and sort to the end of their
+//   Sheet. Each Blank records the clamp margin it was nested with, so a Locked Blank's DXF doesn't change
+//   when the margin does.
 import { MaxRectsBin, PACKING_LOGIC, Rectangle } from 'maxrects-packer';
 import type { CncOp, Model, Part, Sheet } from '../model.ts';
 import { edgeTrimFor, type Settings } from '../settings.ts';
@@ -196,7 +199,8 @@ export interface PlanPrior {
   plan?: Plan;
   /**
    * Part ids ticked Cut. A Board of `plan` with any of them on it (on a Blank or as a Saw Part) is
-   * **Locked**: kept with its geometry, Board number, Blank ids and `#n`, and with every Part on it.
+   * **Locked**: kept with its geometry, Board number, Blank outlines and ids, and its Saw Parts. A Blank
+   * with any of them is Locked as well, and kept with its `#n` and every Part on it.
    */
   cut?: readonly string[];
   /**
@@ -222,12 +226,15 @@ export interface PartRule {
 /** Plans every Sheet of the model. Pure and deterministic. */
 export function plan(model: Model, settings: Settings, prior: PlanPrior = {}): Plan {
   const locked = lockedBoards(prior);
+  const cut = new Set(prior.cut ?? []);
+  const isCut = (id: string) => cut.has(id);
   const live = prior.plan ? new Set(prior.plan.sheets.flatMap((s) => [...s.boards.flatMap(livePartIds), ...s.unplaced])) : null;
   const sheets = runOrder(model.sheets).map((sheet) => {
     const before = prior.plan?.sheets.find((s) => s.sheetId === sheet.id);
     return planSheet(sheet, model.parts.filter((p) => p.sheetId === sheet.id), settings, {
       sawCnc: prior.sawCnc ?? {},
       locked: locked.get(sheet.id) ?? [],
+      isCut,
       live,
       // A Sheet without Boards so far is brand-new: it gets its Boards without asking.
       boardsBefore: before && before.boards.length > 0 && !prior.addBoards?.includes(sheet.id) ? before.boards.length : null,
@@ -382,6 +389,8 @@ interface SawItem {
 interface SheetPrior {
   sawCnc: Record<string, PartMode>;
   locked: Board[];
+  /** Ticked Cut: a Blank with one of them on it is Locked. */
+  isCut: (partId: string) => boolean;
   /** Part ids on a Board (not greyed) or too big for one in the prior Plan; null without a prior Plan. */
   live: Set<string> | null;
   /** How many Boards the Sheet had, when it may not get more without asking; null when it may. */
@@ -389,12 +398,18 @@ interface SheetPrior {
 }
 
 function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: SheetPrior): SheetPlan {
-  const { sawCnc, locked } = prior;
-  // Parts on a Locked Board stay where they are; a Locked Saw Part keeps its reason.
+  const { sawCnc, locked, isCut } = prior;
+  // A Locked Board keeps its Breakdown: Saw Parts on it stay where they are, with their reasons, and so do
+  // the Parts of its Locked Blanks. Its other Blanks keep their outlines but are nested again (below).
   const lockedSaw = new Map(
     locked.flatMap((b) => b.sawParts.filter(isLive).map((p) => [p.partId, p.reason] as const)),
   );
-  const lockedIds = new Set(locked.flatMap(livePartIds));
+  const lockedIds = new Set(
+    locked.flatMap((b) => [
+      ...b.blanks.filter((x) => blankLocked(x, isCut)).flatMap((x) => x.parts.filter(isLive).map((p) => p.partId)),
+      ...b.sawParts.filter(isLive).map((p) => p.partId),
+    ]),
+  );
   const cnc: Part[] = [];
   const saw: SawItem[] = [];
   const sawReasons: Record<string, SawReason> = {};
@@ -434,11 +449,24 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
   // Parts on no Board of the prior Plan need nesting: Remakes, Parts added since…
   const needs = new Set(prior.live ? parts.filter((p) => !prior.live?.has(p.id)).map((p) => p.id) : []);
 
+  // 0. The unlocked Blanks of Locked Boards: their outline is sawn already, so they keep it and their own
+  // Parts (still on the CNC) are nested in again with the current settings.
+  const placedEarly = new Set<string>();
+  const cncById = new Map(cnc.map((p) => [p.id, p]));
+  const relaid = locked.map((board) => ({
+    ...board,
+    blanks: board.blanks.map((blank) => {
+      if (blankLocked(blank, isCut)) return blank;
+      const out = relayBlank(ctx, blank, cncById);
+      for (const p of out.parts) placedEarly.add(p.partId);
+      return out;
+    }),
+  }));
+
   // 1. Kept, non-discarded Offcuts of Locked Boards, for the CNC Parts that need nesting.
-  const onOffcuts = new Set<string>();
-  const boards = locked.map((board) => {
+  const boards = relaid.map((board) => {
     let out = board;
-    let waiting = nestingOrder(cnc.filter((p) => needs.has(p.id) && !onOffcuts.has(p.id)));
+    let waiting = nestingOrder(cnc.filter((p) => needs.has(p.id) && !placedEarly.has(p.id)));
     for (let i = 0; i < out.offcuts.length && waiting.length > 0; i++) {
       const offcut = out.offcuts[i];
       if (!offcut?.id || !offcut.kept || offcut.used || offcut.discarded) continue;
@@ -449,14 +477,14 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
       const draft = bestBoard(offCtx, waiting, []);
       if (!draft) continue;
       out = cutOffcut(offCtx, out, offcut.id, draft);
-      for (const id of draftPartIds(draft)) onOffcuts.add(id);
-      waiting = waiting.filter((p) => !onOffcuts.has(p.id));
+      for (const id of draftPartIds(draft)) placedEarly.add(id);
+      waiting = waiting.filter((p) => !placedEarly.has(p.id));
     }
     return out;
   });
 
   // 2. The Breakdown of the Sheet's unlocked Boards, with every other Part not on a Locked Board.
-  const cncLeft = cnc.filter((p) => !onOffcuts.has(p.id));
+  const cncLeft = cnc.filter((p) => !placedEarly.has(p.id));
   const sawLeft = saw.filter((s) => fitsBoard(s.part));
   const all = draftBoards(ctx, cncLeft, sawLeft);
   let chosen = all;
@@ -496,6 +524,59 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
     overflow,
     extraBoards,
   };
+}
+
+/**
+ * An unlocked Blank of a Locked Board, laid out again inside its outline: its Parts that are still on the
+ * CNC at the same size keep their places when those still hold with the current clamp margin and bit
+ * diameter, else they are nested again. Parts that no longer fit go back to the rest of the Sheet.
+ */
+function relayBlank(ctx: Ctx, blank: Blank, cncById: ReadonlyMap<string, Part>): Blank {
+  const { settings } = ctx;
+  const clamp = settings.clampMargin;
+  const mine = blank.parts.filter((p) => {
+    const part = isLive(p) ? cncById.get(p.partId) : undefined;
+    return (
+      part !== undefined &&
+      part.cutLength === p.cutLength &&
+      part.cutWidth === p.cutWidth &&
+      (!p.rotated || part.grain === 'none') &&
+      JSON.stringify(part.top) === JSON.stringify(p.ops)
+    );
+  });
+  const rect = (p: Placement) => ({
+    x: p.x,
+    y: p.y,
+    length: p.rotated ? p.cutWidth : p.cutLength,
+    width: p.rotated ? p.cutLength : p.cutWidth,
+  });
+  const holds = mine.every((p, i) => {
+    const r = rect(p);
+    const inside = r.x >= clamp && r.y >= clamp && r.x + r.length <= blank.length - clamp && r.y + r.width <= blank.width - clamp;
+    const gap = settings.bitDiameter;
+    return (
+      inside &&
+      mine.slice(i + 1).every((q) => {
+        const o = rect(q);
+        return r.x + r.length + gap <= o.x || o.x + o.length + gap <= r.x || r.y + r.width + gap <= o.y || o.y + o.width + gap <= r.y;
+      })
+    );
+  });
+  const placed: Omit<Placement, 'n'>[] = holds
+    ? mine.map((p) => ({ ...withoutN(p), narrow: ctx.narrow.has(p.partId) }))
+    : nest(
+        ctx,
+        blank.length,
+        blank.width,
+        nestingOrder(mine.flatMap((p) => cncById.get(p.partId) ?? [])),
+      ).placed;
+  const parts = [...placed].sort((a, b) => a.y - b.y || a.x - b.x).map((p, k) => ({ n: k + 1, ...p }));
+  return { ...blank, clampMargin: clamp, parts };
+}
+
+function withoutN(p: Placement): Omit<Placement, 'n'> {
+  const { partId, x, y, rotated, cutLength, cutWidth, ops, narrow } = p;
+  return { partId, x, y, rotated, cutLength, cutWidth, ops, narrow };
 }
 
 /** Plans Boards one after another until every Part is on one. */

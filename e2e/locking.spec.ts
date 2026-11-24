@@ -34,7 +34,7 @@ test('a Locked Blank survives Regenerate with new settings; the rest is planned 
 
   await setClampMargin(page, '60');
   const stale = page.getByRole('status').filter({ hasText: 'different Machine settings' });
-  await expect(stale).toContainText('Locked Boards and Blanks');
+  await expect(stale).toContainText('Locked Blanks (with a Part ticked Cut) stay exactly as they are');
   await stale.getByRole('button', { name: 'Regenerate' }).click();
   await expect(stale).toHaveCount(0);
 

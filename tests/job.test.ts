@@ -207,6 +207,17 @@ describe('Locked Boards and Blanks on regenerate', () => {
     expect(toe.job.plan.sheets[1]?.sawParts).toEqual(['w1.left.lower.c1/toeKick/0']);
   });
 
+  it('lets a Part on an uncut Blank of a Locked Board switch, and refuses one on a Locked Blank', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    const railCut: Progress = { 'c1/s0.rail[1]': { cut: T1 } };
+    const shelf = setPartMode(job, SHELF, 'saw', railCut);
+    if ('error' in shelf) throw new Error(shelf.error);
+    expect(shelf.job.sawCnc).toEqual({ [SHELF]: 'saw' });
+    expect(setPartMode(job, 'c1/s0.door.leaf[0]', 'saw', shelfCut)).toEqual({
+      error: 'This Part is on Locked Blank W18-1-A, so it stays where it is.',
+    });
+  });
+
   it('refuses a new Sheet code while the Sheet has Locked Boards, since Locked Blanks keep their ids', () => {
     const model = syntheticModel();
     const job = generateJob(model, DEFAULT_SETTINGS);
