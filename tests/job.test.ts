@@ -6,6 +6,7 @@ import {
   addBoards,
   generateJob,
   lockedBoards,
+  needsNesting,
   regenerate,
   remake,
   setOffcutDiscarded,
@@ -242,7 +243,9 @@ describe('Remake and kept Offcuts', () => {
     if ('error' in alone) throw new Error(alone.error);
     expect(lockedBoards(alone.job, alone.progress).map((b) => b.id)).toEqual(['W18-1']);
 
+    expect(needsNesting(alone.job)).toEqual([SHELF]);
     const next = regenerate(alone.job, DEFAULT_SETTINGS, alone.progress);
+    expect(needsNesting(next)).toEqual([]);
     expect(placements(next, SHELF).map(({ blank, p }) => [blank.id, blank.from, p.remade])).toEqual([
       ['W18-1-A', undefined, true],
       // The first kept Offcut the shelf fits with its clamp margins (K1 is too small).
@@ -285,6 +288,7 @@ describe('Remake and kept Offcuts', () => {
 
     const asked = regenerate(marked.job, DEFAULT_SETTINGS, marked.progress);
     expect(asked.plan.sheets[0]?.overflow).toEqual([SHELF]);
+    expect(needsNesting(asked)).toEqual([SHELF]);
     expect(asked.plan.sheets[0]?.boards.map((b) => b.number)).toEqual([1]);
 
     const added = addBoards(asked, [W18(model)], marked.progress);

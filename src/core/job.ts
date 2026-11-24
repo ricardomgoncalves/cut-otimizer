@@ -115,6 +115,15 @@ export function remake(job: Job, progress: Progress, partId: string): { job: Job
   };
 }
 
+/**
+ * The Parts on no Board of the Plan (and not too big for one), in export order: Remakes not nested again
+ * yet, and Parts waiting for a Board (`SheetPlan.overflow`). The next regenerate nests them.
+ */
+export function needsNesting(job: Pick<Job, 'model' | 'plan'>): string[] {
+  const placed = new Set(job.plan.sheets.flatMap((s) => [...s.boards.flatMap(livePartIds), ...s.unplaced]));
+  return job.model.parts.filter((p) => !placed.has(p.id)).map((p) => p.id);
+}
+
 /** Discards a kept Offcut (it is no longer stock for Parts that need nesting), or undoes that. */
 export function setOffcutDiscarded(job: Job, offcutId: string, discarded: boolean): { job: Job } | { error: string } {
   const next = discardOffcut(job.plan, offcutId, discarded);
