@@ -1,0 +1,435 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Answers "Prototype: cut-sheet PDF" (cut-otimizer#11).
+  Three structurally different cut-sheet PDFs, switchable via ?variant=A|B|C:
+    A  Shop flow: pages in the order the work happens (portrait)
+    B  Board packets: one stapled packet per Board (landscape)
+    C  Cabinet-first checklist: a master tick sheet first, then drawings only (compact)
+  Data: a SYNTHETIC export rebuilt from the facts recorded in "Get a real Parts Export
+  of the three cabinets" (41 Parts, B1-B4, 3 Sheets, 412 ops). The nesting is a naive
+  shelf packer, so the Layouts are plausible but not optimal.
+  Print with Ctrl+P (A4, margins: none) or run `node prototype/cut-sheet-pdf/render.mjs`.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cut-sheet prototype</title>
+<style id="page-size"></style>
+<style>
+  :root { --ink:#111; --mute:#666; --line:#999; --light:#e8e8e8; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#888; font: 9pt/1.25 "Helvetica Neue", Arial, sans-serif; color:var(--ink); }
+  .page { background:#fff; margin:12px auto; padding:10mm; overflow:hidden; position:relative; page-break-after:always; break-after:page; }
+  .portrait { width:210mm; height:297mm; }
+  .landscape { width:297mm; height:210mm; }
+  @media print { body{background:#fff} .page{margin:0; box-shadow:none} #switcher{display:none !important} }
+  .page:last-child { break-after:auto; page-break-after:auto; }
+  h1 { font-size:16pt; margin:0 0 2mm; }
+  h2 { font-size:12pt; margin:0 0 2mm; }
+  h3 { font-size:10pt; margin:3mm 0 1mm; }
+  .hdr { display:flex; justify-content:space-between; align-items:baseline; border-bottom:1.5px solid var(--ink); padding-bottom:1.5mm; margin-bottom:3mm; }
+  .hdr .meta { color:var(--mute); font-size:8pt; text-align:right; }
+  .foot { position:absolute; bottom:5mm; left:10mm; right:10mm; display:flex; justify-content:space-between; color:var(--mute); font-size:7pt; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { border-bottom:0.5px solid var(--line); padding:0.8mm 1.2mm; text-align:left; vertical-align:middle; }
+  th { font-size:7.5pt; color:var(--mute); font-weight:600; border-bottom:1px solid var(--ink); }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  td.c, th.c { text-align:center; }
+  .key { color:var(--mute); font-size:7pt; font-family:Menlo,monospace; }
+  .mono { font-family:Menlo,monospace; font-size:8pt; }
+  .box { display:inline-block; width:3.6mm; height:3.6mm; border:1px solid var(--ink); vertical-align:middle; }
+  .na { color:#bbb; }
+  .pill { display:inline-block; border:1px solid var(--ink); border-radius:2mm; padding:0 1.5mm; font-size:7pt; font-weight:600; }
+  .flip { background:#111; color:#fff; border-color:#111; }
+  .warn { border:1px solid var(--ink); padding:2mm; margin:2mm 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:4mm; }
+  .cols { display:flex; gap:5mm; }
+  .muted { color:var(--mute); }
+  .small { font-size:7.5pt; }
+  .big { font-size:20pt; font-weight:700; }
+  .stat { border:1px solid var(--line); padding:2mm; }
+  .cabhead { background:var(--light); font-weight:700; }
+  svg text { font-family: "Helvetica Neue", Arial, sans-serif; }
+  #switcher { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#ff0; color:#000; border:2px solid #000;
+    border-radius:999px; padding:6px 10px; display:flex; gap:10px; align-items:center; font:600 13px system-ui; box-shadow:0 4px 14px rgba(0,0,0,.4); z-index:9; }
+  #switcher button { border:0; background:#000; color:#ff0; border-radius:999px; width:28px; height:28px; font-size:16px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="doc"></div>
+<div id="switcher"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+<script>
+// ============================================================ SETTINGS (Machine settings snapshot)
+const S = { bed:1300, clamp:40, kerf:3.2, trim:0, bit:6, gap:12, jobShort:'KIT', jobName:'Kitchen run — 4 base cabinets',
+  generated: new Date('2026-11-24T10:30:00') };
+const USABLE = S.bed - 2*S.clamp;
+
+// ============================================================ SYNTHETIC EXPORT (from cut-otimizer#5 facts)
+const SHEETS = {
+  W18:{ code:'W18', name:'White melamine 18', t:18, L:2800, W:2070, grain:'none' },
+  O18:{ code:'O18', name:'Oak melamine 18',   t:18, L:2800, W:2070, grain:'length' },
+  M8: { code:'M8',  name:'White MDF 8',       t:8,  L:2800, W:2070, grain:'none' },
+};
+const WB='White ABS 1×23', OB='Oak ABS 1×23';
+const HUMAN = { leftSide:'Left side', rightSide:'Right side', bottom:'Bottom', frontRail:'Front rail', backRail:'Back rail',
+  back:'Back', 's0.door.leaf[0]':'Door', 's0.shelf[0]':'Shelf' };
+let pid = 0;
+const parts = [];
+function part(o){ // L along x, W along y. band: {x0,xL,y0,yW}
+  const b = Object.assign({x0:null,xL:null,y0:null,yW:null}, o.band||{});
+  const cutL = o.L - (b.x0?1:0) - (b.xL?1:0), cutW = o.W - (b.y0?1:0) - (b.yW?1:0);
+  const p = Object.assign({ id:'p'+String(++pid).padStart(3,'0'), top:[], bottom:[], manual:[], saw:false }, o, { band:b, cutL, cutW });
+  p.display = p.cab ? `${p.cab} · ${HUMAN[p.name]||p.name}` : p.item;
+  p.group = p.cab || p.item.replace(/^.*?(B\d).*$/,'$1');
+  parts.push(p); return p;
+}
+const drill=(x,y,d,z)=>({k:'drill',x,y,d,z}); // z null = through
+const groove=(x,y,l,w,z)=>({k:'groove',x,y,l,w,z});
+for (const [i,cab] of ['B1','B2','B3','B4'].entries()) {
+  for (const name of ['leftSide','rightSide']) {
+    const top=[]; for (let k=0;k<18;k++){ top.push(drill(120+k*32,37,5,12)); top.push(drill(120+k*32,493,5,12)); }
+    top.push(drill(80,37,5,12), drill(690,37,5,12));
+    top.push(groove(0,535.5,720,8.5,8));
+    part({cab,name,sheet:'W18',L:720,W:560,band:{y0:WB},top});
+  }
+  const legs=[]; for (const [cx,cy] of [[60,60],[504,60],[60,500],[504,500]]) for (const [dx,dy] of [[0,0],[32,0],[0,32],[32,32]]) legs.push(drill(cx+dx-16,cy+dy-16,4,10));
+  part({cab,name:'bottom',sheet:'W18',L:564,W:560,band:{y0:WB},top:[groove(0,535.5,564,8.5,8)],bottom:legs});
+  part({cab,name:'frontRail',sheet:'W18',L:564,W:100});
+  part({cab,name:'backRail',sheet:'W18',L:564,W:99});
+  part({cab,name:'back',sheet:'M8',L:590,W:700,saw:true});
+  const left = i<2, hy = left?22.5:595-22.5, dy = left?32:595-32, gy = left?595-40:40;
+  part({cab,name:'s0.door.leaf[0]',sheet:'O18',L:717,W:597,band:{x0:OB,xL:OB,y0:OB,yW:OB},grain:'length',
+    top:[drill(600,gy,4.5,null),drill(472,gy,4.5,null)],
+    bottom:[drill(100,hy,35,13),drill(600,hy,35,13),drill(76,dy,8,11),drill(124,dy,8,11),drill(576,dy,8,11),drill(624,dy,8,11)]});
+  part({cab,name:'s0.shelf[0]',sheet:'W18',L:563,W:540,band:{y0:WB}});
+}
+for (const [item,sh] of [['End Panel B1 start','O18'],['End Panel B2 start','W18'],['End Panel B2 end','W18'],['End Panel B3 start','W18'],['End Panel B3 end','W18'],['End Panel B4 end','O18']])
+  part({item,name:'endPanel',sheet:sh,L:869,W:577,band:{y0:sh==='O18'?OB:WB,xL:sh==='O18'?OB:WB},grain:sh==='O18'?'length':null});
+for (const [item,sh,L] of [['Toe Kick B1','O18',600],['Toe Kick B2','O18',1200],['Toe Kick B3','W18',600]])
+  part({item,name:'toeKick',sheet:sh,L,W:150,band:{y0:sh==='O18'?OB:WB},grain:sh==='O18'?'length':null,saw:true});
+
+// ============================================================ SIDE B FILES (exact-match grouping)
+function bottomView(p){ // mirror about x axis, then rotate 180 if ops are nearer the far edges
+  let ops = p.bottom.map(o=>({...o, y:p.cutW-o.y}));
+  const my = ops.reduce((a,o)=>a+o.y,0)/ops.length, mx = ops.reduce((a,o)=>a+o.x,0)/ops.length;
+  let rot = (my > p.cutW/2 && mx > p.cutL/2);
+  if (my > p.cutW/2) { ops = ops.map(o=>({...o, x:p.cutL-o.x, y:p.cutW-o.y})); rot = true; }
+  const fenceLong = rot ? 'y0' : 'yW', fenceShort = rot ? 'xL' : 'x0';
+  return { ops, sig: p.cutL+'x'+p.cutW+'|'+ops.map(o=>[o.x,o.y,o.d,o.z].join(',')).sort().join(';'), fenceLong, fenceShort };
+}
+const sideB = []; // {id, parts, view}
+for (const p of parts.filter(p=>p.bottom.length)) {
+  const v = bottomView(p);
+  let f = sideB.find(f=>f.view.sig===v.sig);
+  if (!f) { f = { id:`${S.jobShort}-B${sideB.length+1}`, parts:[], view:v, sample:p }; sideB.push(f); }
+  f.parts.push(p); p.sideB = f.id;
+}
+
+// ============================================================ NESTING (naive shelf packer) + BREAKDOWN (guillotine strips)
+const blanks=[], boards=[];
+function nestSheet(code){
+  const sh = SHEETS[code];
+  const list = parts.filter(p=>p.sheet===code && !p.saw).map(p=>{
+    const free = !(sh.grain==='length' || p.grain==='length');
+    const opts = [{rot:false,w:p.cutL,h:p.cutW}]; if (free) opts.push({rot:true,w:p.cutW,h:p.cutL});
+    return { p, opts };
+  }).sort((a,b)=>b.p.cutL*b.p.cutW-a.p.cutL*a.p.cutW);
+  const out=[];
+  for (const it0 of list) {
+    let best=null; // best fit into an existing row: least height waste
+    for (const bl of out) for (const row of bl.rows) for (const o of it0.opts)
+      if (o.h<=row.h && row.x+o.w<=USABLE) { const waste=row.h-o.h; if (!best||waste<best.waste) best={bl,row,o,waste}; }
+    if (best) { place(best.bl,best.row,{p:it0.p,...best.o}); continue; }
+    let nr=null; // else a new row in an existing Blank, lowest row first
+    for (const bl of out) { const ny = bl.rows.length ? bl.rows.at(-1).y+bl.rows.at(-1).h+S.gap : 0;
+      for (const o of it0.opts) if (ny+o.h<=USABLE && o.w<=USABLE && (!nr||o.w<nr.o.w)) nr={bl,ny,o}; }
+    if (nr) { const row={y:nr.ny,h:nr.o.h,x:0}; nr.bl.rows.push(row); place(nr.bl,row,{p:it0.p,...nr.o}); continue; }
+    const o = it0.opts.reduce((a,b)=>b.w<a.w?b:a);
+    const bl={sheet:code,rows:[],items:[]}; out.push(bl); const row={y:0,h:o.h,x:0}; bl.rows.push(row); place(bl,row,{p:it0.p,...o});
+  }
+  function place(bl,row,it){ bl.items.push({...it,x:row.x,y:row.y}); row.x+=it.w+S.gap; }
+  for (const bl of out){ // shrink to used extent + clamp margin
+    bl.w = Math.max(...bl.items.map(i=>i.x+i.w)) + 2*S.clamp;
+    bl.h = Math.max(...bl.items.map(i=>i.y+i.h)) + 2*S.clamp;
+  }
+  // pieces for the Board: Blanks + Saw Parts
+  const pieces = out.map(b=>({kind:'blank',b,w:b.w,h:b.h}))
+    .concat(parts.filter(p=>p.sheet===code&&p.saw).map(p=>{const rot=sh.grain!=='length'&&p.grain!=='length'&&p.cutW>p.cutL; return {kind:'saw',p,w:rot?p.cutW:p.cutL,h:rot?p.cutL:p.cutW};}))
+    .sort((a,b)=>b.h-a.h||b.w-a.w);
+  const bds=[];
+  for (const pc of pieces){
+    let ok=false;
+    for (const bd of bds){
+      for (const st of bd.strips) if (pc.h<=st.h && st.x+pc.w<=sh.L-2*S.trim){ st.items.push({...pc,x:st.x}); st.x+=pc.w+S.kerf; ok=true; break; }
+      if (ok) break;
+      if (bd.y+pc.h<=sh.W-2*S.trim){ const st={y:bd.y,h:pc.h,x:pc.w+S.kerf,items:[{...pc,x:0}]}; bd.strips.push(st); bd.y+=pc.h+S.kerf; ok=true; break; }
+    }
+    if (!ok){ const bd={sheet:code,strips:[],y:pc.h+S.kerf}; bd.strips.push({y:0,h:pc.h,x:pc.w+S.kerf,items:[{...pc,x:0}]}); bds.push(bd); }
+  }
+  bds.forEach((bd,i)=>{
+    bd.n=i+1; bd.of=bds.length; bd.id=`${code}-${bd.n}`; let letter=0; bd.cuts=[]; bd.offcuts=[]; bd.saws=[]; bd.blanks=[];
+    bd.strips.forEach((st,si)=>{
+      const rn = si+1; const last = si===bd.strips.length-1 && sh.W-(st.y+st.h)<1;
+      bd.cuts.push({no:`${rn}`, dir:'Rip', set:st.h, ref: si===0?'front edge (Y0)':'cut edge of remainder', yields:`strip ${rn} · ${st.h.toFixed(1)} wide`});
+      st.items.forEach((it,k)=>{
+        if (it.kind==='blank'){ it.b.id=`${code}-${bd.n}-${String.fromCharCode(65+letter++)}`; it.b.board=bd; bd.blanks.push(it.b); blanks.push(it.b); it.label=it.b.id; it.b.pos={x:it.x,y:st.y}; }
+        else { it.label=it.p.display; it.p.board=bd; bd.saws.push(it.p); it.p.loc=`${bd.id} saw`; }
+        bd.cuts.push({no:`${rn}${String.fromCharCode(97+k)}`, dir:'Cross', set:it.w, ref: k===0?'left end of strip':'cut end', yields:`${it.label} · ${it.w.toFixed(0)}×${it.h.toFixed(0)}${it.h<st.h?` (+ rip ${it.h.toFixed(0)} from strip edge)`:''}`});
+        if (it.h<st.h) bd.offcuts.push({x:it.x,y:st.y+it.h+S.kerf,w:it.w,h:st.h-it.h-S.kerf});
+      });
+      if (sh.L-st.x>1) bd.offcuts.push({x:st.x,y:st.y,w:sh.L-st.x,h:st.h});
+    });
+    if (sh.W-bd.y>1) bd.offcuts.push({x:0,y:bd.y,w:sh.L,h:sh.W-bd.y});
+    bd.offcuts = bd.offcuts.filter(o=>o.w>5&&o.h>5);
+    boards.push(bd);
+  });
+  out.forEach(bl=>bl.items.forEach((it,i)=>{ it.no=i+1; it.p.blank=bl; it.p.no=i+1; it.p.loc=`${bl.id} #${i+1}`; }));
+}
+['W18','O18','M8'].forEach(nestSheet);
+blanks.sort((a,b)=>a.id.localeCompare(b.id));
+
+// ============================================================ LAYERS
+const fmt = n => (Math.round(n*10)/10).toString().replace('.','P');
+function layersOf(){
+  const m=new Map(); const add=(l,t,s)=>{ const e=m.get(l)||{l,n:0,t,s}; e.n++; m.set(l,e); };
+  for (const p of parts) {
+    const t=SHEETS[p.sheet].t;
+    if (!p.saw) add('OUTLINE_THRU', '', 'profile outside, tabs?');
+    for (const o of p.top.concat(p.bottom)) {
+      if (o.k==='drill') add(o.z==null?`DRILL_D${fmt(o.d)}_THRU`:`DRILL_D${fmt(o.d)}_Z${fmt(o.z)}`, t, o.d<S.bit?'drill bit (tool change)':o.d===S.bit?'plunge':'helix / pocket');
+      else add(`GROOVE_W${fmt(o.w)}_Z${fmt(o.z)}`, t, 'pocket, 2 passes');
+    }
+  }
+  return [...m.values()].sort((a,b)=>a.l.localeCompare(b.l));
+}
+
+// ============================================================ HELPERS
+const steps = p => ({ cut:true, sideB:!!p.sideB, band:Object.values(p.band).some(Boolean), manual:p.manual.length>0 });
+const box = on => on ? '<span class="box"></span>' : '<span class="na">—</span>';
+const mm = n => Number.isInteger(n)?n:n.toFixed(1);
+const size = (l,w) => `${mm(l)} × ${mm(w)}`;
+function bandGlyph(p, s=22){ // little outline, banded edges thick. x0 left, xL right, y0 bottom (front), yW top
+  const w=s, h=Math.max(8,Math.round(s*p.W/p.L)), b=p.band, T=(on)=>on?3:0.6;
+  return `<svg width="${w+4}" height="${h+4}" viewBox="-2 -2 ${w+4} ${h+4}" style="vertical-align:middle">
+   <line x1="0" y1="${h}" x2="${w}" y2="${h}" stroke="#000" stroke-width="${T(b.y0)}"/>
+   <line x1="0" y1="0" x2="${w}" y2="0" stroke="#000" stroke-width="${T(b.yW)}"/>
+   <line x1="0" y1="0" x2="0" y2="${h}" stroke="#000" stroke-width="${T(b.x0)}"/>
+   <line x1="${w}" y1="0" x2="${w}" y2="${h}" stroke="#000" stroke-width="${T(b.xL)}"/></svg>`;
+}
+const bandText = p => { const e=Object.entries(p.band).filter(([,v])=>v); if(!e.length) return '<span class="na">—</span>';
+  const names=[...new Set(e.map(([,v])=>v))]; return `${e.map(([k])=>k).join(' ')}<br><span class="key">${names.join(', ')}</span>`; };
+const grainTxt = p => (p.grain==='length' || SHEETS[p.sheet].grain==='length') ? '→ along L' : '<span class="na">—</span>';
+const opsCount = p => p.top.length + p.bottom.length;
+const genTime = S.generated.toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'});
+function header(title, sub='', page=''){ return `<div class="hdr"><div><h2 style="margin:0">${title}</h2>${sub?`<div class="muted small">${sub}</div>`:''}</div><div class="meta">${S.jobName}<br>Job ${S.jobShort} · generated ${genTime}</div></div>`; }
+const foot = (n) => `<div class="foot"><span>PROTOTYPE · synthetic data · app is the source of truth, paper ticks are not synced</span><span>${n}</span></div>`;
+let pageNo=0; const P = (cls, html) => `<section class="page ${cls}">${html}${foot('p. '+(++pageNo))}</section>`;
+
+// ---------- Blank drawing (Side A, top view, origin front-left, X = Board length)
+function blankSVG(bl, {wmm, names=false, fontPx=11}={}){
+  const W=bl.w, H=bl.h, sc = wmm / Math.max(W, H*1.0);
+  const X = x=>x, Y = y=>H-y; // flip so front edge is at the bottom
+  let s = `<svg viewBox="-60 -40 ${W+120} ${H+110}" width="${(W+120)*sc}mm" style="display:block">`;
+  s += `<rect x="0" y="0" width="${W}" height="${H}" fill="#fafafa" stroke="#000" stroke-width="3"/>`;
+  s += `<rect x="${S.clamp}" y="${S.clamp}" width="${W-2*S.clamp}" height="${H-2*S.clamp}" fill="none" stroke="#999" stroke-width="2" stroke-dasharray="14 10"/>`;
+  for (const it of bl.items) {
+    const p=it.p, px=S.clamp+it.x, py=S.clamp+it.y, w=it.w, h=it.h;
+    const flip = !!p.sideB;
+    s += `<rect x="${px}" y="${Y(py+h)}" width="${w}" height="${h}" fill="${flip?'#e9e9e9':'#fff'}" stroke="#000" stroke-width="2.5"/>`;
+    // ops (top face only on Side A; through bottom ops would be mirrored here)
+    for (const o of p.top) {
+      const [ox,oy] = it.rot ? [o.y,o.x] : [o.x,o.y];
+      if (o.k==='drill') s+=`<circle cx="${px+ox}" cy="${Y(py+oy)}" r="${Math.max(o.d/2,3)}" fill="${o.z==null?'#000':'none'}" stroke="#000" stroke-width="1.5"/>`;
+      else { const [gw,gh]= it.rot?[o.w,o.l]:[o.l,o.w]; const [gx,gy]= it.rot?[o.y,o.x]:[o.x,o.y]; s+=`<rect x="${px+gx}" y="${Y(py+gy+gh)}" width="${gw}" height="${gh}" fill="#bbb" stroke="none"/>`; }
+    }
+    // banded edges: heavy line just inside the outline (mapped through rotation)
+    const edges = it.rot ? {y0:'x0', yW:'xL', x0:'y0', xL:'yW'} : {x0:'x0',xL:'xL',y0:'y0',yW:'yW'};
+    for (const [e,drawE] of Object.entries(edges)) if (p.band[e]) {
+      const d=9; let l;
+      if (drawE==='y0') l=[px,Y(py)-d,px+w,Y(py)-d]; if (drawE==='yW') l=[px,Y(py+h)+d,px+w,Y(py+h)+d];
+      if (drawE==='x0') l=[px+d,Y(py),px+d,Y(py+h)]; if (drawE==='xL') l=[px+w-d,Y(py),px+w-d,Y(py+h)];
+      s+=`<line x1="${l[0]}" y1="${l[1]}" x2="${l[2]}" y2="${l[3]}" stroke="#000" stroke-width="9"/>`;
+    }
+    const cx=px+w/2, cy=Y(py+h/2), fs=fontPx/sc*0.26;
+    if (names && h < fs*4.5) { s += `<text x="${cx}" y="${cy+fs*0.3}" font-size="${Math.min(fs*0.8,h*0.6)}" text-anchor="middle"><tspan font-weight="700">${it.no}</tspan> · ${p.display} · ${size(p.cutL,p.cutW)}</text>`; continue; }
+    s += `<circle cx="${cx}" cy="${cy-(names?fs*0.8:0)}" r="${fs*1.05}" fill="#fff" stroke="#000" stroke-width="2"/><text x="${cx}" y="${cy-(names?fs*0.8:0)+fs*0.36}" font-size="${fs}" text-anchor="middle" font-weight="700">${it.no}</text>`;
+    if (names) s += `<text x="${cx}" y="${cy+fs*1.4}" font-size="${fs*0.85}" text-anchor="middle">${p.display}${flip?' ◐':''}</text><text x="${cx}" y="${cy+fs*2.4}" font-size="${fs*0.7}" text-anchor="middle" fill="#555">${size(p.cutL,p.cutW)}</text>`;
+    if (flip && !names) s += `<text x="${px+w-12}" y="${Y(py+h)+fs*1.1}" font-size="${fs}" text-anchor="end">◐</text>`;
+    if (p.grain==='length'||SHEETS[p.sheet].grain==='length') s += `<text x="${px+14}" y="${Y(py)-18}" font-size="${fs*0.8}" fill="#555">grain →</text>`;
+  }
+  const fs = 30;
+  s += `<path d="M -40 ${H+10} L 0 ${H} L -10 ${H+40}" fill="none" stroke="#000" stroke-width="3"/><text x="-50" y="${H+70}" font-size="${fs}">0,0 front-left</text>`;
+  s += `<text x="${W/2}" y="${H+70}" font-size="${fs}" text-anchor="middle">X → Board length · ${mm(W)} mm</text>`;
+  s += `<text x="${W+20}" y="${H/2}" font-size="${fs}" transform="rotate(-90 ${W+40} ${H/2})" text-anchor="middle">Y ${mm(H)} mm</text>`;
+  return s + '</svg>';
+}
+// ---------- Board breakdown drawing
+function boardSVG(bd, wmm){
+  const sh=SHEETS[bd.sheet], W=sh.L, H=sh.W, sc=wmm/W, Y=y=>H-y;
+  let s=`<svg viewBox="-80 -60 ${W+160} ${H+170}" width="${wmm}mm" style="display:block"><defs><pattern id="hatch${bd.id}" width="40" height="40" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="40" stroke="#999" stroke-width="6"/></pattern></defs>`;
+  s+=`<rect x="0" y="0" width="${W}" height="${H}" fill="#fff" stroke="#000" stroke-width="5"/>`;
+  for (const o of bd.offcuts) s+=`<rect x="${o.x}" y="${Y(o.y+o.h)}" width="${o.w}" height="${o.h}" fill="url(#hatch${bd.id})" stroke="#999" stroke-width="2"/>`+
+     (o.w>250&&o.h>90?`<text x="${o.x+o.w/2}" y="${Y(o.y+o.h/2)+14}" font-size="44" text-anchor="middle" fill="#333" paint-order="stroke" stroke="#fff" stroke-width="10">Offcut ${mm(o.w)}×${mm(o.h)}</text>`:'');
+  bd.strips.forEach((st,si)=>{
+    st.items.forEach((it,k)=>{
+      s+=`<rect x="${it.x}" y="${Y(st.y+it.h)}" width="${it.w}" height="${it.h}" fill="${it.kind==='saw'?'#e5e5e5':'#fff'}" stroke="#000" stroke-width="4"/>`;
+      const fsz = it.h<200?38:58;
+      s+=`<text x="${it.x+it.w/2}" y="${Y(st.y+it.h/2)+fsz*0.1}" font-size="${fsz}" font-weight="700" text-anchor="middle">${it.kind==='saw'?'SAW · ':''}${it.label}</text>`;
+      if (it.h>=200) s+=`<text x="${it.x+it.w/2}" y="${Y(st.y+it.h/2)+fsz*1.1}" font-size="42" text-anchor="middle" fill="#444">${mm(it.w)} × ${mm(it.h)}</text>`;
+      s+=`<circle cx="${it.x+it.w}" cy="${Y(st.y+it.h/2)}" r="34" fill="#000"/><text x="${it.x+it.w}" y="${Y(st.y+it.h/2)+13}" font-size="36" fill="#fff" text-anchor="middle" font-weight="700">${si+1}${String.fromCharCode(97+k)}</text>`;
+    });
+    s+=`<line x1="-60" y1="${Y(st.y+st.h)}" x2="${W+60}" y2="${Y(st.y+st.h)}" stroke="#000" stroke-width="3" stroke-dasharray="30 14"/>`;
+    s+=`<circle cx="-40" cy="${Y(st.y+st.h)}" r="34" fill="#fff" stroke="#000" stroke-width="5"/><text x="-40" y="${Y(st.y+st.h)+13}" font-size="38" text-anchor="middle" font-weight="700">${si+1}</text>`;
+  });
+  s+=`<text x="0" y="${H+70}" font-size="46">Reference edge: front (Y0) ▲ · X = length ${W} · grain ${sh.grain}</text><text x="${W}" y="${H+70}" font-size="46" text-anchor="end">${W} × ${H}</text>`;
+  return s+'</svg>';
+}
+function cutTable(bd, compact=false){
+  return `<table><tr><th>#</th><th>Cut</th><th class="n">Fence / track</th><th>Measured from</th><th>Gives</th><th class="c">✓</th></tr>`+
+    bd.cuts.map(c=>`<tr><td><b>${c.no}</b></td><td>${c.dir}</td><td class="n"><b>${mm(c.set)}</b></td><td class="small">${c.ref}</td><td class="small">${c.yields}</td><td class="c"><span class="box"></span></td></tr>`).join('')+`</table>
+    <div class="small muted" style="margin-top:1mm">Settings are to the near side of the blade · kerf ${S.kerf} · trim ${S.trim}${compact?'':' · Offcuts are hatched and not tracked'}</div>`;
+}
+function partTable(rows, {loc=false, no=true, ticks=true, compact=false}={}){
+  return `<table><tr>${no?'<th>#</th>':''}${loc?'<th>Where</th>':''}<th>Part</th><th class="n">Finished</th><th class="n">Cut</th><th>Banding</th>${compact?'':'<th>Grain</th>'}<th>Side B</th><th>Manual ops</th>${ticks?'<th class="c">Cut</th><th class="c">Side B</th><th class="c">Band</th><th class="c">Man.</th>':''}</tr>`+
+   rows.map(p=>{ const st=steps(p); return `<tr>${no?`<td><b>${p.no??''}</b></td>`:''}${loc?`<td class="mono">${p.loc}</td>`:''}
+     <td><b>${p.display}</b><br><span class="key">${p.name}</span></td><td class="n">${size(p.L,p.W)}</td><td class="n"><b>${size(p.cutL,p.cutW)}</b></td>
+     <td>${bandGlyph(p)} <span class="small">${bandText(p)}</span></td>${compact?'':`<td class="small">${grainTxt(p)}</td>`}
+     <td>${p.sideB?`<span class="pill flip">${p.sideB}</span>`:'<span class="na">—</span>'}</td><td class="small">${p.manual.length?p.manual.join('<br>'):'<span class="na">—</span>'}</td>
+     ${ticks?`<td class="c">${box(st.cut)}</td><td class="c">${box(st.sideB)}</td><td class="c">${box(st.band)}</td><td class="c">${box(st.manual)}</td>`:''}</tr>`; }).join('')+'</table>';
+}
+function sideBSVG(f, wmm){
+  const p=f.sample, W=p.cutL, H=p.cutW, Y=y=>H-y;
+  let s=`<svg viewBox="-110 -60 ${W+170} ${H+150}" width="${wmm}mm" style="display:block">`;
+  s+=`<rect x="0" y="0" width="${W}" height="${H}" fill="#f4f4f4" stroke="#000" stroke-width="3" stroke-dasharray="10 6"/>`;
+  s+=`<path d="M -30 ${H+30} L ${W*0.6} ${H+30} M -30 ${H+30} L -30 ${H*0.4}" stroke="#000" stroke-width="22"/>`;
+  for (const o of f.view.ops) s+=`<circle cx="${o.x}" cy="${Y(o.y)}" r="${o.d/2}" fill="none" stroke="#000" stroke-width="3"/>`;
+  s+=`<text x="${W*0.3}" y="${H+90}" font-size="34" text-anchor="middle">${f.view.fenceLong} against long fence</text>`;
+  s+=`<text x="-70" y="${H*0.7}" font-size="34" text-anchor="middle" transform="rotate(-90 -70 ${H*0.7})">${f.view.fenceShort} against short fence</text>`;
+  s+=`<text x="${W-10}" y="-15" font-size="30" text-anchor="end" fill="#555">clamp here (far edges) ⟶</text>`;
+  s+=`<text x="10" y="${H+12}" font-size="28" fill="#555">0,0</text>`;
+  return s+'</svg>';
+}
+function sideBPage(cls, wmm=78, cols=2){
+  const rows = sideB.map(f=>`<div class="stat" style="break-inside:avoid"><div style="display:flex;justify-content:space-between;align-items:baseline"><b class="mono" style="font-size:11pt">${f.id}.side-b.dxf</b><span class="pill flip">× ${f.parts.length}</span></div>
+     <div class="small">${f.sample.display.replace(/^B\d · /,'')} · cut ${size(f.sample.cutL,f.sample.cutW)} · ${f.view.ops.length} ops · bottom face up · fence lower than ${SHEETS[f.sample.sheet].t} mm stock</div>
+     ${sideBSVG(f,wmm)}
+     <table>${f.parts.map(p=>`<tr><td><b>${p.display}</b></td><td class="mono">${p.loc}</td><td class="c">Side B ${box(true)}</td></tr>`).join('')}</table></div>`).join('');
+  return P(cls, header('Side B batch', 'After every Side A run, before edge banding. Zero the machine on the Fence corner once.')+
+    `<div class="grid2" style="grid-template-columns:repeat(${cols},1fr)">${rows}</div>`);
+}
+function legendTable(){
+  return `<table><tr><th>Layer</th><th class="n">Count</th><th class="n">Stock</th><th>Suggested toolpath</th></tr>`+
+   layersOf().map(l=>`<tr><td class="mono">${l.l}</td><td class="n">${l.n}</td><td class="n">${l.t||'—'}</td><td class="small">${l.s}</td></tr>`).join('')+
+   `<tr><td class="mono muted">REF_BLANK · REF_CLAMP · REF_PART · REF_V1</td><td colspan="3" class="small muted">reference only, never cut</td></tr></table>`;
+}
+function settingsTable(){
+  return `<table class="small"><tr><td>Bed</td><td class="n">${S.bed} × ${S.bed}</td></tr><tr><td>Clamp margin (4 edges)</td><td class="n">${S.clamp}</td></tr><tr><td>Bit</td><td class="n">Ø${S.bit}</td></tr>
+    <tr><td>Saw kerf</td><td class="n">${S.kerf}</td></tr><tr><td>Edge trim</td><td class="n">${S.trim}</td></tr><tr><td>Manual op kinds</td><td class="n">none</td></tr></table>`;
+}
+function materialsTable(){
+  return `<table><tr><th>Sheet</th><th>Code</th><th class="n">Boards</th><th class="n">Blanks</th><th class="n">Saw Parts</th><th class="n">Parts</th></tr>`+
+    Object.values(SHEETS).map(sh=>{ const bd=boards.filter(b=>b.sheet===sh.code); return `<tr><td>${sh.name} · ${sh.L}×${sh.W} · grain ${sh.grain}</td><td class="mono">${sh.code}</td><td class="n"><b>${bd.length}</b></td><td class="n">${bd.reduce((a,b)=>a+b.blanks.length,0)}</td><td class="n">${bd.reduce((a,b)=>a+b.saws.length,0)}</td><td class="n">${parts.filter(p=>p.sheet===sh.code).length}</td></tr>`; }).join('')+'</table>';
+}
+function bandingSummary(){
+  const m={}; for (const p of parts) for (const [e,v] of Object.entries(p.band)) if (v){ m[v]=m[v]||{n:0,len:0}; m[v].n++; m[v].len += (e[0]==='x'?p.W:p.L); }
+  return `<table><tr><th>Edgeband</th><th class="n">Edges</th><th class="n">Length (+10%)</th></tr>`+Object.entries(m).map(([k,v])=>`<tr><td>${k}</td><td class="n">${v.n}</td><td class="n">${(v.len*1.1/1000).toFixed(1)} m</td></tr>`).join('')+'</table>';
+}
+const cabinets = [...new Set(parts.map(p=>p.group))].sort();
+function cabinetSummary(cls, perPage=2){
+  let html='';
+  for (let i=0;i<cabinets.length;i+=perPage){
+    html += P(cls, header('Cabinet summary', 'Where every Part is, and what is left to do. Ready to assemble when every box is ticked.')+
+      cabinets.slice(i,i+perPage).map(c=>{ const ps=parts.filter(p=>p.group===c); return `<h3>${c} · Base door 600 × 870 × 578 <span class="muted small">· ${ps.length} Parts (incl. end panels and toe kicks)</span></h3>${partTable(ps,{loc:true,no:false,compact:true})}`; }).join(''));
+  }
+  return html;
+}
+const leftovers = () => `<div class="warn small"><b>Before you start:</b> Toe Kick B2 (1200 × 150) is a Saw Part. ${parts.filter(p=>p.saw).length} Saw Parts in total (backs, toe kicks), marked by hand. No Manual ops in this Job. Skipped items: none.</div>`;
+
+// ============================================================ VARIANT A — Shop flow (portrait)
+function VariantA(){
+  let h = P('portrait', `<h1>Cut sheet · ${S.jobName}</h1><div class="muted">Job ${S.jobShort} · generated ${genTime} · ${parts.length} Parts · ${boards.length} Boards · ${blanks.length} Blanks · ${sideB.length} Side B files</div>
+    <h3>Order of work</h3><ol class="small" style="margin:0 0 2mm 4mm;padding:0"><li>Saw: break each Board into Blanks and Saw Parts (pp. 2–${1+boards.length})</li><li>CNC Side A: one page per Blank</li><li>CNC Side B batch (Flip Parts)</li><li>Edge banding</li><li>Cabinet summary: check off and assemble</li></ol>
+    ${leftovers()}<h3>Materials</h3>${materialsTable()}
+    <div class="cols"><div style="flex:1"><h3>Machine settings (snapshot)</h3>${settingsTable()}</div><div style="flex:1"><h3>Edgebanding</h3>${bandingSummary()}</div></div>
+    <h3>Layer legend</h3>${legendTable()}`);
+  for (const bd of boards) h += P('portrait', header(`1 · Saw · ${SHEETS[bd.sheet].name} · Board ${bd.n} of ${bd.of}`, `${bd.blanks.length} Blanks, ${bd.saws.length} Saw Parts, ${bd.offcuts.length} Offcuts`)+boardSVG(bd,190)+`<h3>Cuts, in order</h3>`+cutTable(bd));
+  for (const bl of blanks) {
+    const rows = bl.items.map(i=>i.p);
+    h += P('portrait', header(`2 · CNC Side A · <span class="mono" style="font-size:13pt">${bl.id}</span>`, `${SHEETS[bl.sheet].name} · Blank ${size(bl.w,bl.h)} · file ${bl.id}.side-a.dxf · ${rows.length} Parts · ${rows.reduce((a,p)=>a+p.top.length,0)} top ops`)+
+      `<div style="display:flex;justify-content:center">${blankSVG(bl,{wmm: (rows.length>5?0.7:1)*Math.min(165, 165*bl.w/Math.max(bl.w,bl.h)) })}</div><div class="small muted" style="text-align:center;margin-bottom:2mm">◐ Flip Part (grey) · ━ banded edge · ● through hole · ▭ dashed = clamp margin</div>`+
+      partTable(rows)+`<div style="margin-top:3mm"><span class="box"></span> Side A done (ticks Cut on all ${rows.length})</div>`);
+  }
+  h += sideBPage('portrait', 80);
+  // banding list
+  for (const b of [WB,OB]) { const ps=parts.filter(p=>Object.values(p.band).includes(b));
+    for (let i=0;i<ps.length;i+=16) h += P('portrait', header('4 · Edge banding · '+b, `Bands go on after Side B. Cut size is 1 mm smaller per banded edge. ${ps.length} Parts${ps.length>16?` (${i/16+1} of ${Math.ceil(ps.length/16)})`:''}`)+
+      partTable(ps.slice(i,i+16),{loc:true,no:false,compact:true})); }
+  h += cabinetSummary('portrait', 2);
+  return h;
+}
+// ============================================================ VARIANT B — Board packets (landscape)
+function VariantB(){
+  let h = P('landscape', `<div class="cols" style="height:100%"><div style="flex:1"><h1>${S.jobName}</h1><div class="muted">Job ${S.jobShort} · generated ${genTime}</div>
+    ${leftovers()}<h3>Packets — staple each Board's pages and keep them with its stack</h3>
+    <table>${boards.map(bd=>`<tr><td><b class="mono">${bd.id}</b></td><td>${SHEETS[bd.sheet].name} · Board ${bd.n} of ${bd.of}</td><td class="mono small">${bd.blanks.map(b=>b.id).join(' ')||'saw only'}</td><td class="n">${bd.blanks.reduce((a,b)=>a+b.items.length,0)+bd.saws.length} Parts</td></tr>`).join('')}
+    <tr><td><b>Side B</b></td><td colspan="3">${sideB.map(f=>`${f.id} × ${f.parts.length}`).join(' · ')}</td></tr></table>
+    <h3>Materials</h3>${materialsTable()}</div>
+    <div style="width:105mm"><h3>Machine settings</h3>${settingsTable()}<h3>Layer legend</h3>${legendTable()}<h3>Edgebanding</h3>${bandingSummary()}</div></div>`);
+  for (const bd of boards) {
+    h += P('landscape', header(`Packet ${bd.id} · Breakdown`, `${SHEETS[bd.sheet].name} · Board ${bd.n} of ${bd.of}`)+
+      `<div class="cols"><div style="width:150mm">${boardSVG(bd,150)}</div><div style="flex:1">${cutTable(bd,true)}
+       ${bd.saws.length?`<h3>Saw Parts from this Board</h3>${partTable(bd.saws,{no:false,compact:true})}<div style="margin-top:2mm"><span class="box"></span> Breakdown done (ticks Cut on Saw Parts)</div>`:''}</div></div>`);
+    for (const bl of bd.blanks) {
+      const rows = bl.items.map(i=>i.p);
+      h += P('landscape', header(`Packet ${bd.id} · Side A <span class="mono">${bl.id}</span>`, `Blank ${size(bl.w,bl.h)} · ${bl.id}.side-a.dxf · zero on front-left corner`)+
+        `<div class="cols"><div style="width:120mm">${blankSVG(bl,{wmm:118})}<div class="small muted">◐ Flip Part · ━ banded edge · ● through · dashed = clamp margin</div>
+         <div style="margin-top:3mm;font-size:11pt"><span class="box"></span> Side A done</div></div><div style="flex:1">${partTable(rows,{compact:true})}</div></div>`);
+    }
+  }
+  h += sideBPage('landscape', 78, 3);
+  h += cabinetSummary('landscape', 1);
+  return h;
+}
+// ============================================================ VARIANT C — Cabinet-first checklist (compact)
+function VariantC(){
+  // page 1-2: master tick sheet grouped by Cabinet
+  const rows = cabinets.map(c=>{ const ps=parts.filter(p=>p.group===c);
+    return `<tr class="cabhead"><td colspan="9">${c} <span class="muted small">· ${ps.length} Parts</span></td><td class="c small">Done ___/${ps.length}</td></tr>`+
+     ps.map(p=>{ const st=steps(p); return `<tr><td><b>${p.display.replace(/^B\d · /,'')}</b></td><td class="n">${size(p.cutL,p.cutW)}</td><td>${bandGlyph(p,18)}</td><td class="mono">${p.saw?'<b>SAW</b> '+p.board.id:p.blank.id+' <b>#'+p.no+'</b>'}</td><td class="mono small">${p.sideB||''}</td><td class="small">${p.manual.join(', ')}</td>
+       <td class="c">${box(st.cut)}</td><td class="c">${box(st.sideB)}</td><td class="c">${box(st.band)}</td><td class="c">${box(st.manual)}</td></tr>`; }).join(''); });
+  const head = `<tr><th>Part</th><th class="n">Cut size</th><th>Band</th><th>Where</th><th>Side B</th><th>Manual</th><th class="c">Cut</th><th class="c">B</th><th class="c">Band</th><th class="c">Man.</th></tr>`;
+  const half = Math.ceil(rows.length/2);
+  let h = P('portrait', `<div class="hdr"><div><h1 style="margin:0">Master checklist</h1><div class="muted small">${S.jobName} · ${parts.length} Parts · ${boards.length} Boards · ${blanks.length} Blanks · ${sideB.length} Side B files</div></div><div class="meta">Job ${S.jobShort}<br>generated ${genTime}</div></div>
+     <table class="small">${head}${rows.slice(0,half).join('')}</table>`);
+  h += P('portrait', header('Master checklist (cont.)')+`<table class="small">${head}${rows.slice(half).join('')}</table>${leftovers()}`);
+  // breakdowns: 2 per page
+  for (let i=0;i<boards.length;i+=2) h += P('portrait', boards.slice(i,i+2).map(bd=>`<h2>Saw · ${bd.id} <span class="muted small">${SHEETS[bd.sheet].name} · Board ${bd.n} of ${bd.of}</span></h2>${boardSVG(bd,120)}<div class="small">${bd.cuts.map(c=>`<b>${c.no}</b> ${c.dir} <b>${mm(c.set)}</b>`).join(' · ')}</div>`).join('<hr>'));
+  // blanks: 2 per page, drawing with names, no table
+  for (let i=0;i<blanks.length;i+=2) h += P('portrait', blanks.slice(i,i+2).map(bl=>`<div style="height:132mm"><h2><span class="mono">${bl.id}</span> <span class="muted small">Side A · ${size(bl.w,bl.h)} · ${bl.id}.side-a.dxf · ${bl.items.length} Parts</span> <span style="float:right" class="small"><span class="box"></span> Side A done</span></h2>
+     <div style="display:flex;justify-content:center">${blankSVG(bl,{wmm:Math.min(150,118*bl.w/bl.h),names:true,fontPx:13})}</div></div>`).join('<hr>'));
+  h += sideBPage('portrait', 80);
+  h += P('portrait', header('Reference')+`<h3>Layer legend</h3>${legendTable()}<h3>Materials</h3>${materialsTable()}<div class="cols"><div style="flex:1"><h3>Machine settings</h3>${settingsTable()}</div><div style="flex:1"><h3>Edgebanding</h3>${bandingSummary()}</div></div>`);
+  return h;
+}
+
+// ============================================================ SWITCHER
+const VARIANTS = { A:['Shop flow',VariantA,'A4 portrait'], B:['Board packets',VariantB,'A4 landscape'], C:['Cabinet-first checklist',VariantC,'A4 portrait'] };
+const keys = Object.keys(VARIANTS);
+const params = new URLSearchParams(location.search);
+let v = keys.includes(params.get('variant')) ? params.get('variant') : 'A';
+function render(){
+  pageNo=0;
+  document.getElementById('page-size').textContent = `@page { size: ${VARIANTS[v][2].replace('A4 ','A4 ')}; margin:0 }`;
+  document.getElementById('doc').innerHTML = VARIANTS[v][1]();
+  document.getElementById('vlabel').textContent = `${v} (${VARIANTS[v][0]}) · ${pageNo} pages`;
+  document.title = `Cut sheet prototype ${v}`;
+}
+function go(d){ v = keys[(keys.indexOf(v)+d+keys.length)%keys.length]; history.replaceState(null,'','?variant='+v); render(); scrollTo(0,0); }
+document.getElementById('prev').onclick=()=>go(-1); document.getElementById('next').onclick=()=>go(1);
+addEventListener('keydown',e=>{ if (e.target.closest('input,textarea,[contenteditable]')) return; if(e.key==='ArrowLeft')go(-1); if(e.key==='ArrowRight')go(1); });
+render();
+window.__state = { parts:parts.length, boards:boards.map(b=>({id:b.id,blanks:b.blanks.map(x=>x.id+' '+Math.round(x.w)+'x'+Math.round(x.h)+' n'+x.items.length),saws:b.saws.length})), sideB:sideB.map(f=>f.id+' x'+f.parts.length+' '+f.sample.display), pages:pageNo };
+</script>
+</body>
+</html>
