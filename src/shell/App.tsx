@@ -1,35 +1,47 @@
-import { useState, type ChangeEvent } from 'react';
+import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { APP_NAME } from '../core/app.ts';
 import { toDxfFiles } from '../core/dxf/index.ts';
 import { importExport, type ImportIssue } from '../core/import/index.ts';
+import { generateJob, regenerate, setSheetCode, sheetCode, snapshotChanges, type Job } from '../core/job.ts';
 import type { Model, Part } from '../core/model.ts';
-import { plan, type Plan } from '../core/planner/index.ts';
-import { DEFAULT_SETTINGS } from '../core/settings.ts';
+import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
 import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { PartDetail } from './PartDetail.tsx';
+import { SETTING_LABELS } from './setting-labels.ts';
+import { SettingsScreen } from './SettingsScreen.tsx';
+import { loadSettings, saveSettings } from './settings-store.ts';
 
-/** The Job, held in memory only for now (the Job store comes in ticket #29). */
-interface Job {
+/** The open Job, held in memory only for now (the Job store comes in ticket #29). */
+interface LoadedJob extends Job {
+  fileName: string;
+}
+
+/** A loaded export the maker is reviewing in the import summary: nothing is planned yet. */
+interface LoadedExport {
   fileName: string;
   model: Model;
-  /** `null` until the maker has seen the import summary and asked to plan. */
-  plan: Plan | null;
 }
 
 export function App() {
-  const [job, setJob] = useState<Job | null>(null);
+  const [loaded, setLoaded] = useState<LoadedExport | null>(null);
+  const [job, setJob] = useState<LoadedJob | null>(null);
   const [issues, setIssues] = useState<ImportIssue[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [view, setView] = useState<'job' | 'settings'>('job');
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   async function onLoad(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    setLoaded(null);
     setJob(null);
     setIssues([]);
     setLoadError(null);
+    setCodeError(null);
 
     let json: unknown;
     try {
@@ -44,26 +56,85 @@ export function App() {
       setLoadError(`${file.name} is not a valid Parts Export v1. Nothing was loaded.`);
       return;
     }
-    setJob({ fileName: file.name, model: result.model, plan: null });
+    setLoaded({ fileName: file.name, model: result.model });
   }
 
   function onPlan() {
+    if (!loaded) return;
+    setJob({ fileName: loaded.fileName, ...generateJob(loaded.model, settings) });
+    setLoaded(null);
+  }
+
+  function onSaveSettings(next: Settings): boolean {
+    setSettings(next);
+    return saveSettings(next);
+  }
+
+  function onRegenerate() {
     if (!job) return;
-    setJob({ ...job, plan: plan(job.model, DEFAULT_SETTINGS) });
+    setJob({ fileName: job.fileName, ...regenerate(job, settings) });
+  }
+
+  function onSheetCode(sheetId: string, code: string) {
+    if (!job) return;
+    const result = setSheetCode(job, sheetId, code);
+    if ('error' in result) {
+      setCodeError(result.error);
+      return;
+    }
+    setCodeError(null);
+    setJob({ fileName: job.fileName, ...result.job });
   }
 
   function onDownload() {
-    if (!job?.plan) return;
+    if (!job) return;
     const zip = zipFiles(toDxfFiles(job.plan));
     downloadBytes(zip, `${safeFileName(job.model.projectName)}.dxf.zip`, 'application/zip');
   }
 
   const schemaErrors = issues.filter((i) => i.kind === 'schema');
   const partById = new Map<string, Part>(job?.model.parts.map((p) => [p.id, p]) ?? []);
+  const nameOf = (id: string) => partById.get(id)?.displayName ?? id;
+  const changed = job ? snapshotChanges(job, settings) : [];
+
+  const header = (
+    <>
+      <h1>{APP_NAME}</h1>
+      <nav>
+        <button
+          type="button"
+          aria-pressed={view === 'job'}
+          onClick={() => {
+            setView('job');
+          }}
+        >
+          Job
+        </button>{' '}
+        <button
+          type="button"
+          aria-pressed={view === 'settings'}
+          onClick={() => {
+            setView('settings');
+          }}
+        >
+          Machine settings
+        </button>
+      </nav>
+    </>
+  );
+
+  if (view === 'settings') {
+    return (
+      <main>
+        {header}
+        <SettingsScreen settings={settings} sheets={(job ?? loaded)?.model.sheets ?? []} onSave={onSaveSettings} />
+      </main>
+    );
+  }
 
   return (
     <main>
-      <h1>{APP_NAME}</h1>
+      {header}
 
       <p>
         <label>
@@ -86,84 +157,125 @@ export function App() {
         </div>
       )}
 
+      {loaded && (
+        <>
+          <h2>
+            {loaded.model.projectName} <small>({loaded.fileName})</small>
+          </h2>
+          <SkippedWarning issues={issues} />
+          <p>
+            <button type="button" onClick={onPlan}>
+              Plan
+            </button>
+          </p>
+          <ImportSummary model={loaded.model} issues={issues} />
+        </>
+      )}
+
       {job && (
         <>
           <h2>
             {job.model.projectName} <small>({job.fileName})</small>
           </h2>
           <SkippedWarning issues={issues} />
-          {job.plan === null ? (
-            <>
+          {changed.length > 0 && (
+            <div role="status" className="stale">
               <p>
-                <button type="button" onClick={onPlan}>
-                  Plan
-                </button>
+                This Job was generated with different Machine settings (
+                {changed.map((k) => SETTING_LABELS[k]).join(', ')}). Its files keep the old settings until
+                you regenerate it.
               </p>
-              <ImportSummary model={job.model} issues={issues} />
-            </>
-          ) : (
-            <PlanView plan={job.plan} model={job.model} partById={partById} onDownload={onDownload} />
+              <button type="button" onClick={onRegenerate}>
+                Regenerate
+              </button>
+            </div>
           )}
+          {codeError && (
+            <p role="alert" className="error">
+              {codeError}
+            </p>
+          )}
+          <p>
+            <button type="button" onClick={onDownload}>
+              Download DXFs
+            </button>
+          </p>
+          {job.plan.sheets.map((sheet) => (
+            <section key={sheet.sheetId}>
+              <h3>
+                {sheet.code} · {job.model.sheets.find((s) => s.id === sheet.sheetId)?.name}
+              </h3>
+              <SheetCodeField
+                key={sheetCode(job, sheet.sheetId)}
+                code={sheetCode(job, sheet.sheetId)}
+                sheetName={job.model.sheets.find((s) => s.id === sheet.sheetId)?.name ?? sheet.sheetId}
+                onCommit={(code) => {
+                  onSheetCode(sheet.sheetId, code);
+                }}
+              />
+              {sheet.sawParts.length > 0 && (
+                <p>Saw Parts: {sheet.sawParts.map(nameOf).join(', ')}</p>
+              )}
+              {sheet.boards.flatMap((board) =>
+                board.blanks.map((blank) => (
+                  <figure key={blank.id}>
+                    <figcaption>
+                      <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
+                      {blank.parts.length} Part(s)
+                    </figcaption>
+                    <BlankLayout blank={blank} clampMargin={job.plan.settings.clampMargin} nameOf={nameOf} />
+                    <ol>
+                      {blank.parts.map((p) => {
+                        const part = partById.get(p.partId);
+                        const size = `${String(p.cutLength / 1000)} × ${String(p.cutWidth / 1000)}${p.rotated ? ' (turned)' : ''}`;
+                        return (
+                          <li key={p.partId} value={p.n}>
+                            {part ? (
+                              <PartDetail part={part}>
+                                <div>{size}</div>
+                              </PartDetail>
+                            ) : (
+                              <code>{p.partId}</code>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </figure>
+                )),
+              )}
+            </section>
+          ))}
         </>
       )}
     </main>
   );
 }
 
-interface PlanViewProps {
-  plan: Plan;
-  model: Model;
-  partById: Map<string, Part>;
-  onDownload: () => void;
-}
-
-function PlanView({ plan, model, partById, onDownload }: PlanViewProps) {
-  const nameOf = (id: string) => partById.get(id)?.displayName ?? id;
+/** A Sheet code input, committed on Enter or when it loses focus. Empty goes back to the derived code. */
+function SheetCodeField(props: { code: string; sheetName: string; onCommit: (code: string) => void }) {
+  const [value, setValue] = useState(props.code);
+  const commit = () => {
+    if (value.trim().toUpperCase() !== props.code) props.onCommit(value);
+  };
   return (
-    <>
-      <p>
-        <button type="button" onClick={onDownload}>
-          Download DXFs
-        </button>
-      </p>
-      {plan.sheets.map((sheet) => (
-        <section key={sheet.sheetId}>
-          <h3>
-            {sheet.code} · {model.sheets.find((s) => s.id === sheet.sheetId)?.name}
-          </h3>
-          {sheet.sawParts.length > 0 && (
-            <p>Saw Parts: {sheet.sawParts.map(nameOf).join(', ')}</p>
-          )}
-          {sheet.boards.flatMap((board) =>
-            board.blanks.map((blank) => (
-              <figure key={blank.id}>
-                <figcaption>
-                  <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
-                  {blank.parts.length} Part(s)
-                </figcaption>
-                <BlankLayout blank={blank} clampMargin={plan.settings.clampMargin} nameOf={nameOf} />
-                <ol>
-                  {blank.parts.map((p) => {
-                    const part = partById.get(p.partId);
-                    const size = `${String(p.cutLength / 1000)} × ${String(p.cutWidth / 1000)}${p.rotated ? ' (turned)' : ''}`;
-                    return (
-                      <li key={p.partId} value={p.n}>
-                        {part ? (
-                          <PartDetail part={part}>
-                            <div>{size}</div>
-                          </PartDetail>
-                        ) : (
-                          <code>{p.partId}</code>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </figure>
-            )),
-          )}
-        </section>
-      ))}
-    </>
+    <form
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        commit();
+      }}
+    >
+      <label>
+        Sheet code for {props.sheetName}{' '}
+        <input
+          size={8}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+          }}
+          onBlur={commit}
+        />
+      </label>
+    </form>
   );
 }

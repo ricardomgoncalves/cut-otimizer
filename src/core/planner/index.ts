@@ -9,11 +9,12 @@
 //   diameter between Parts. A piece that gets Parts is a Blank; an empty one is not used.
 // - A Part that cannot fit the usable bed (in any orientation its grain allows) is a Saw Part.
 //   Saw Parts are listed per Sheet; they are not yet laid out on a Board (ticket #27).
+// - The Sheet's edge trim (Machine settings, per-Sheet override) comes off every Board edge first.
 // - Blanks are never rotated: Board length runs along X. Only `grain: none` Parts may rotate.
 // - Only `top` ops go to Side A; `bottom` ops are ignored (Import warns; Flip Parts are #28).
 import { MaxRectsBin, PACKING_LOGIC, Rectangle } from 'maxrects-packer';
 import type { CncOp, Model, Part, Sheet } from '../model.ts';
-import type { Settings } from '../settings.ts';
+import { edgeTrimFor, type Settings } from '../settings.ts';
 
 /** A Part nested on a Blank. Coordinates are µm in the Blank frame (origin front-left). */
 export interface Placement {
@@ -125,17 +126,20 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings): SheetPlan {
 }
 
 /**
- * The fixed v0 Breakdown of a Board, in saw order: rip strips from the front edge, each as wide as
- * the bed allows, then crosscut each strip from the left into pieces as long as the bed allows.
+ * The fixed v0 Breakdown of a Board, in saw order: trim the Sheet's edge trim off all four edges, rip
+ * strips from the front edge, each as wide as the bed allows, then crosscut each strip from the left into pieces as long as the bed allows.
  * Pieces too small to hold anything inside the clamp margin are left out.
  */
 function sawPieces(sheet: Sheet, settings: Settings): Piece[] {
   const pieces: Piece[] = [];
   const minSide = 2 * settings.clampMargin;
-  for (let y = 0; y < sheet.width; y += settings.bedWidth + settings.sawKerf) {
-    const width = Math.min(settings.bedWidth, sheet.width - y);
-    for (let x = 0; x < sheet.length; x += settings.bedLength + settings.sawKerf) {
-      const length = Math.min(settings.bedLength, sheet.length - x);
+  const trim = edgeTrimFor(settings, sheet.id);
+  const endY = sheet.width - trim;
+  const endX = sheet.length - trim;
+  for (let y = trim; y < endY; y += settings.bedWidth + settings.sawKerf) {
+    const width = Math.min(settings.bedWidth, endY - y);
+    for (let x = trim; x < endX; x += settings.bedLength + settings.sawKerf) {
+      const length = Math.min(settings.bedLength, endX - x);
       if (length > minSide && width > minSide) pieces.push({ x, y, length, width });
     }
   }

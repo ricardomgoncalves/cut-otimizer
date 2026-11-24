@@ -143,6 +143,46 @@ describe('plan', () => {
     expect(plan(model, DEFAULT_SETTINGS)).toEqual(plan(model, DEFAULT_SETTINGS));
   });
 
+  it('reads the clamp margin from its settings: a wider margin changes the Layout and the invariants hold', () => {
+    const model = randomModel(3, 40);
+    const wide: Settings = { ...DEFAULT_SETTINGS, clampMargin: 120000 };
+    const before = plan(model, DEFAULT_SETTINGS);
+    const after = plan(model, wide);
+
+    expectInvariants(model, after, wide);
+    expect(after.settings).toEqual(wide);
+    const first = (p: Plan) => allBlanks(p)[0]?.parts.map((q) => [q.partId, q.x, q.y]);
+    expect(first(after)).not.toEqual(first(before));
+    // Every Part on the first Blank now sits at least 120 mm in from its edges.
+    for (const p of allBlanks(after)[0]?.parts ?? []) {
+      expect(Math.min(p.x, p.y)).toBeGreaterThanOrEqual(120000);
+    }
+  });
+
+  it('trims every Board edge by the Sheet edge trim before breaking it down', () => {
+    const model = randomModel(2, 40);
+    const settings: Settings = { ...DEFAULT_SETTINGS, edgeTrim: 10000, edgeTrimBySheet: { s2: 25000 } };
+    const result = plan(model, settings);
+
+    expectInvariants(model, result, settings);
+    for (const sheet of result.sheets) {
+      const trim = sheet.sheetId === 's2' ? 25000 : 10000;
+      for (const board of sheet.boards) {
+        for (const blank of board.blanks) {
+          expect(blank.x, blank.id).toBeGreaterThanOrEqual(trim);
+          expect(blank.y, blank.id).toBeGreaterThanOrEqual(trim);
+          expect(blank.x + blank.length, blank.id).toBeLessThanOrEqual(board.length - trim);
+          expect(blank.y + blank.width, blank.id).toBeLessThanOrEqual(board.width - trim);
+        }
+      }
+    }
+    // The first Blank of each Sheet starts at the trimmed corner.
+    expect(result.sheets.map((s) => [s.boards[0]?.blanks[0]?.x, s.boards[0]?.blanks[0]?.y])).toEqual([
+      [10000, 10000],
+      [25000, 25000],
+    ]);
+  });
+
   it.each([1, 2, 3, 4, 5])('holds the invariants on random export %i', (seed) => {
     const model = randomModel(seed, 40);
     expectInvariants(model, plan(model, DEFAULT_SETTINGS), DEFAULT_SETTINGS);
