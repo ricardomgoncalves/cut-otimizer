@@ -8,6 +8,7 @@ import { importExport, type ImportIssue } from '../import/index.ts';
 import type { Job } from '../job.ts';
 import type { Model } from '../model.ts';
 import type { Plan } from '../planner/index.ts';
+import { STEPS, type PartTicks, type Progress } from '../progress.ts';
 import { parseSettings, type Settings } from '../settings.ts';
 
 export const JOB_FORMAT = 1;
@@ -38,6 +39,11 @@ export interface JobDocument {
   plan: Plan | null;
   /** Per-Part Saw/CNC choice made by hand, by Export Part id. */
   sawCncOverrides: Record<string, 'saw' | 'cnc'>;
+  /**
+   * Step ticks by Export Part id (progress.ts). Roll-ups are computed from these, never stored. Missing in
+   * files saved before ticking existed: read as no ticks.
+   */
+  progress: Progress;
 }
 
 /** A step from `jobFormat` n to n + 1, keyed by n. */
@@ -75,6 +81,7 @@ export function createJobDocument({ id, shortId, rawExport, fileName, model, set
     sheetCodes: {},
     plan: null,
     sawCncOverrides: {},
+    progress: {},
   };
 }
 
@@ -119,6 +126,11 @@ export function withJob(doc: JobDocument, job: Job, now: string): JobDocument {
     plan: job.plan,
     updatedAt: now,
   };
+}
+
+/** Stores the Job's ticks. */
+export function withProgress(doc: JobDocument, progress: Progress, now: string): JobDocument {
+  return { ...doc, progress, updatedAt: now };
 }
 
 /** Renames a Job. A blank name keeps the old one. */
@@ -220,13 +232,24 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
     sheetCodes: strings('sheetCodes', (v): v is string => typeof v === 'string'),
     plan: null,
     sawCncOverrides: strings('sawCncOverrides', (v): v is 'saw' | 'cnc' => v === 'saw' || v === 'cnc'),
+    progress: {},
   };
+  const progress = raw['progress'] ?? {};
+  if (isRecord(progress) && Object.values(progress).every(isPartTicks)) doc.progress = progress as Progress;
+  else problems.push('progress must map Part ids to Step tick times');
   const plan = raw['plan'] ?? null;
   if (plan !== null && !(isRecord(plan) && Array.isArray(plan['sheets']))) problems.push('plan must be a Plan or null');
   else doc.plan = plan as Plan | null;
 
   if (problems.length > 0) return { error: `This file is not a usable Job file: ${problems.join('; ')}.` };
   return { doc };
+}
+
+function isPartTicks(v: unknown): v is PartTicks {
+  return (
+    isRecord(v) &&
+    Object.entries(v).every(([step, at]) => (STEPS as readonly string[]).includes(step) && typeof at === 'string')
+  );
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

@@ -28,6 +28,7 @@ function door(id: string, bottom: CncOp[], size: { length: number; width: number
     top: [],
     bottom,
     manualOps: [],
+    edges: {},
   };
 }
 

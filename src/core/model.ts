@@ -70,6 +70,16 @@ export interface Part {
   bottom: CncOp[];
   /** Ops no file can carry: edge-face ops and ops the DXF grammar can't draw. Done by hand. */
   manualOps: ManualOp[];
+  /** Edgeband ids by edge, as in the export (`{}` = unbanded). A banded Part gets the Banded Step. */
+  edges: PartEdges;
+}
+
+/** Edgeband id per banded edge of a Part. A missing edge is unbanded. */
+export interface PartEdges {
+  x0?: string;
+  xL?: string;
+  y0?: string;
+  yW?: string;
 }
 
 /** A Part face, as the export names it. */

@@ -10,6 +10,7 @@ import {
   setArchived,
   toJobFile,
   withJob,
+  withProgress,
   type JobDocument,
 } from '../src/core/job-store/document.ts';
 import { createMemoryJobStore, type JobStore } from '../src/core/job-store/store.ts';
@@ -47,6 +48,13 @@ describe.each(adapters)('JobStore (%s)', (_name, makeStore) => {
     const doc = A();
     await store.put(doc);
     expect(await store.get(doc.id)).toEqual(doc);
+  });
+
+  it('keeps the ticks of a Job', async () => {
+    const store = makeStore();
+    const ticked = withProgress(A(), { 'c1/s0.rail[1]': { cut: '2026-11-22T09:00:00.000Z' } }, '2026-11-22T09:00:00.000Z');
+    await store.put(ticked);
+    expect((await store.get(ticked.id))?.progress).toEqual({ 'c1/s0.rail[1]': { cut: '2026-11-22T09:00:00.000Z' } });
   });
 
   it('round-trips a document read from .job.json', async () => {

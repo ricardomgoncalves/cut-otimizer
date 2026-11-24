@@ -1,0 +1,218 @@
+// Progress: the Steps each Part goes through, the ticks made on them, and the roll-ups computed from
+// those ticks (PRD stories 9.1, 9.2, 9.6 and 9.7). Ticks are keyed by Export Part id and stored in the
+// Job document; roll-ups are always computed, never stored.
+import type { Job } from './job.ts';
+import type { Board, SheetPlan } from './planner/index.ts';
+
+/** One tracked stage of a Part, in Run order. */
+export type Step = 'cut' | 'sideB' | 'banded' | 'manualOps';
+
+export const STEPS: readonly Step[] = ['cut', 'sideB', 'banded', 'manualOps'];
+
+/** What the Progress module reads from a Job. */
+export type JobView = Pick<Job, 'model' | 'plan'>;
+
+/** When each ticked Step was ticked (ISO 8601), by Export Part id. A Part with no ticks has no entry. */
+export type Progress = Record<string, PartTicks>;
+export type PartTicks = Partial<Record<Step, string>>;
+
+/** A change to the ticks. Bulk events tick only the Parts and Steps they name, and keep earlier times. */
+export type ProgressEvent =
+  | { kind: 'tick'; partId: string; step: Step; at: string }
+  | { kind: 'untick'; partId: string; step: Step }
+  /** "Side A done": Cut on every Part of a Blank. */
+  | { kind: 'sideADone'; blankId: string; at: string }
+  /** "Breakdown done": Cut on every Saw Part of a Board. */
+  | { kind: 'breakdownDone'; boardId: string; at: string }
+  /** Side B on every Part of a Side B file. */
+  | { kind: 'sideBDone'; fileId: string; at: string };
+
+/** Applies one event. Steps that don't apply to a Part, and unknown Parts, are ignored. */
+export function apply(job: JobView, progress: Progress, event: ProgressEvent): Progress {
+  switch (event.kind) {
+    case 'tick':
+      return tick(job, progress, [event.partId], event.step, event.at);
+    case 'untick': {
+      const ticks = progress[event.partId];
+      if (ticks?.[event.step] === undefined) return progress;
+      const rest: PartTicks = Object.fromEntries(Object.entries(ticks).filter(([step]) => step !== event.step));
+      const out: Progress = Object.fromEntries(Object.entries(progress).filter(([id]) => id !== event.partId));
+      if (Object.keys(rest).length > 0) out[event.partId] = rest;
+      return out;
+    }
+    case 'sideADone': {
+      const blank = boards(job).flatMap((b) => b.board.blanks).find((b) => b.id === event.blankId);
+      return tick(job, progress, blank?.parts.map((p) => p.partId) ?? [], 'cut', event.at);
+    }
+    case 'breakdownDone': {
+      const board = boards(job).find((b) => b.id === event.boardId);
+      return tick(job, progress, board?.board.sawParts.map((p) => p.partId) ?? [], 'cut', event.at);
+    }
+    case 'sideBDone': {
+      const file = job.plan.sideB.find((f) => f.id === event.fileId);
+      return tick(job, progress, file?.partIds ?? [], 'sideB', event.at);
+    }
+  }
+}
+
+/** A Board's id: `<Sheet code>-<Board number>` (`W18-1`), the prefix of its Blank ids. */
+export function boardId(sheet: Pick<SheetPlan, 'code'>, board: Pick<Board, 'number'>): string {
+  return `${sheet.code}-${String(board.number)}`;
+}
+
+interface BoardRef {
+  id: string;
+  sheet: SheetPlan;
+  board: Board;
+}
+
+function boards(job: JobView): BoardRef[] {
+  return job.plan.sheets.flatMap((sheet) => sheet.boards.map((board) => ({ id: boardId(sheet, board), sheet, board })));
+}
+
+/** Every Part cut from a Board: its Blanks' Parts, then its Saw Parts. */
+function boardParts(board: Board): string[] {
+  return [...board.blanks.flatMap((b) => b.parts.map((p) => p.partId)), ...board.sawParts.map((p) => p.partId)];
+}
+
+function tick(job: JobView, progress: Progress, partIds: readonly string[], step: Step, at: string): Progress {
+  let out = progress;
+  for (const partId of partIds) {
+    if (progress[partId]?.[step] !== undefined || !steps(job, partId).includes(step)) continue;
+    if (out === progress) out = { ...progress };
+    out[partId] = { ...progress[partId], [step]: at };
+  }
+  return out;
+}
+
+/** A Part is Done when every Step that applies to it is ticked. */
+export function isDone(job: JobView, progress: Progress, partId: string): boolean {
+  const ticks = progress[partId];
+  const applicable = steps(job, partId);
+  return applicable.length > 0 && applicable.every((s) => ticks?.[s] !== undefined);
+}
+
+const isCut = (progress: Progress, partId: string) => progress[partId]?.cut !== undefined;
+
+export interface BlankProgress {
+  id: string;
+  cut: number;
+  done: number;
+  total: number;
+  /** At least one Part ticked Cut. */
+  locked: boolean;
+}
+
+export interface BoardProgress {
+  /** `W18-1`. */
+  id: string;
+  sheetId: string;
+  /** Its Blanks' Parts and its Saw Parts. */
+  cut: number;
+  total: number;
+  locked: boolean;
+}
+
+export interface SheetProgress {
+  sheetId: string;
+  code: string;
+  /** Every Part of the Sheet, including Saw Parts on no Board. */
+  cut: number;
+  total: number;
+}
+
+export interface OwnerProgress {
+  ownerId: string;
+  kind: 'cabinet' | 'generatedItem';
+  label: string;
+  done: number;
+  total: number;
+  /** Cabinets only: every Part Done. Always false for a Generated Item. */
+  readyToAssemble: boolean;
+}
+
+export interface Rollup {
+  /** In Run order. */
+  blanks: BlankProgress[];
+  /** In Run order. */
+  boards: BoardProgress[];
+  /** In Run order. */
+  sheets: SheetProgress[];
+  /** Cabinets, then Generated Items, in export order. Owners without Parts are left out. */
+  owners: OwnerProgress[];
+  job: { cut: number; done: number; total: number };
+}
+
+/** Every roll-up of the Job, computed from the ticks. */
+export function rollup(job: JobView, progress: Progress): Rollup {
+  const done = new Set(job.model.parts.filter((p) => isDone(job, progress, p.id)).map((p) => p.id));
+  const cutOf = (ids: readonly string[]) => ids.filter((id) => isCut(progress, id)).length;
+
+  const blanks: BlankProgress[] = [];
+  const boardRows: BoardProgress[] = [];
+  for (const { id, sheet, board } of boards(job)) {
+    for (const blank of board.blanks) {
+      const ids = blank.parts.map((p) => p.partId);
+      const cut = cutOf(ids);
+      blanks.push({ id: blank.id, cut, done: ids.filter((i) => done.has(i)).length, total: ids.length, locked: cut > 0 });
+    }
+    const ids = boardParts(board);
+    const cut = cutOf(ids);
+    boardRows.push({ id, sheetId: sheet.sheetId, cut, total: ids.length, locked: cut > 0 });
+  }
+
+  const sheets = job.plan.sheets.map((sheet): SheetProgress => {
+    const ids = [...sheet.boards.flatMap(boardParts), ...sheet.unplaced];
+    return { sheetId: sheet.sheetId, code: sheet.code, cut: cutOf(ids), total: ids.length };
+  });
+
+  const owners = [...job.model.owners]
+    .sort((a, b) => Number(a.kind === 'generatedItem') - Number(b.kind === 'generatedItem'))
+    .flatMap((owner): OwnerProgress[] => {
+      const ids = job.model.parts.filter((p) => p.ownerId === owner.id).map((p) => p.id);
+      if (ids.length === 0) return [];
+      const ownerDone = ids.filter((i) => done.has(i)).length;
+      return [
+        {
+          ownerId: owner.id,
+          kind: owner.kind,
+          label: owner.label,
+          done: ownerDone,
+          total: ids.length,
+          readyToAssemble: owner.kind === 'cabinet' && ownerDone === ids.length,
+        },
+      ];
+    });
+
+  const all = job.model.parts.map((p) => p.id);
+  return { blanks, boards: boardRows, sheets, owners, job: { cut: cutOf(all), done: done.size, total: all.length } };
+}
+
+/**
+ * The Blank and Board ids (in that order) that unticking this Step would unlock: those whose only Part
+ * ticked Cut is this one. Empty for any Step but Cut.
+ */
+export function wouldUnlock(job: JobView, progress: Progress, partId: string, step: Step): string[] {
+  if (step !== 'cut' || !isCut(progress, partId)) return [];
+  const othersCut = (ids: readonly string[]) => ids.some((id) => id !== partId && isCut(progress, id));
+  const out: string[] = [];
+  for (const { id, board } of boards(job)) {
+    const ids = boardParts(board);
+    if (!ids.includes(partId)) continue;
+    const blank = board.blanks.find((b) => b.parts.some((p) => p.partId === partId));
+    if (blank && !othersCut(blank.parts.map((p) => p.partId))) out.push(blank.id);
+    if (!othersCut(ids)) out.push(id);
+  }
+  return out;
+}
+
+/** The Steps that apply to a Part, in Step order. Empty for a Part that isn't in the Job. */
+export function steps(job: JobView, partId: string): Step[] {
+  const part = job.model.parts.find((p) => p.id === partId);
+  if (!part) return [];
+  const out: Step[] = ['cut'];
+  if (job.plan.sideB.some((f) => f.partIds.includes(partId))) out.push('sideB');
+  if (Object.values(part.edges).some((id) => id !== undefined)) out.push('banded');
+  if (job.plan.manualOps.some((op) => op.partId === partId)) out.push('manualOps');
+  return out;
+}
