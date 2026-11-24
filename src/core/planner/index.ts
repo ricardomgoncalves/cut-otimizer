@@ -29,7 +29,7 @@ import type { CncOp, Model, Part, Sheet } from '../model.ts';
 import { edgeTrimFor, type Settings } from '../settings.ts';
 import { sideB, type JobManualOp, type SideBFile } from './side-b.ts';
 
-export { sideBPoint, type Edge, type JobManualOp, type QuarterTurns, type SideBFile } from './side-b.ts';
+export { sideB, sideBPoint, type Edge, type JobManualOp, type QuarterTurns, type SideBFile } from './side-b.ts';
 
 /** A Part nested on a Blank. Coordinates are µm in the Blank frame (origin front-left). */
 export interface Placement {
@@ -52,6 +52,21 @@ export interface Placement {
    * Blank and its DXF don't change, but it is planned again elsewhere and counts nowhere here.
    */
   remade?: boolean;
+  /**
+   * A void left on a Locked Blank by a re-import (#39): the Part `moved` (changed before it was cut, so
+   * nested again elsewhere), was `removed` from the export before it was cut, or is now a `spare` (removed
+   * after it was cut). Like a Remake it stays greyed where it was, so the Blank's DXF and PDF page don't
+   * change, and counts nowhere here.
+   */
+  voided?: VoidReason;
+}
+
+/** Why a Placement is a void (see `Placement.voided`). */
+export type VoidReason = 'moved' | 'removed' | 'spare';
+
+/** A Placement or Saw Part that is cut here now: not a greyed Remake and not a void. */
+export function isLive(p: { remade?: boolean; voided?: VoidReason }): boolean {
+  return p.remade !== true && p.voided === undefined;
 }
 
 export interface Blank {
@@ -90,6 +105,8 @@ export interface SawPlacement {
   reason: SawReason;
   /** Marked Remake: stays here greyed out, and is planned again elsewhere. */
   remade?: boolean;
+  /** A void left by a re-import on a Locked Board (see `Placement.voided`). */
+  voided?: VoidReason;
 }
 
 /**
@@ -231,11 +248,11 @@ function lockedBoards(prior: PlanPrior): Map<string, Board[]> {
   return out;
 }
 
-/** The Parts a Board gives now: its Blanks' Parts, then its Saw Parts, leaving out Remakes (greyed). */
+/** The Parts a Board gives now: its Blanks' Parts, then its Saw Parts, leaving out Remakes and voids (greyed). */
 export function livePartIds(board: Board): string[] {
   return [
-    ...board.blanks.flatMap((b) => b.parts.filter((p) => !p.remade).map((p) => p.partId)),
-    ...board.sawParts.filter((p) => !p.remade).map((p) => p.partId),
+    ...board.blanks.flatMap((b) => b.parts.filter(isLive).map((p) => p.partId)),
+    ...board.sawParts.filter(isLive).map((p) => p.partId),
   ];
 }
 
@@ -257,8 +274,8 @@ export function blankLocked(blank: Blank, isCut: (partId: string) => boolean): b
  * next plan nests it again. Unchanged when the Part is on no Board.
  */
 export function remakePart(plan: Plan, partId: string): Plan {
-  const mark = <T extends { partId: string; remade?: boolean }>(p: T): T =>
-    p.partId === partId && !p.remade ? { ...p, remade: true } : p;
+  const mark = <T extends { partId: string; remade?: boolean; voided?: VoidReason }>(p: T): T =>
+    p.partId === partId && isLive(p) ? { ...p, remade: true } : p;
   return mapBoards(plan, (board) =>
     livePartIds(board).includes(partId)
       ? {
@@ -375,7 +392,7 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
   const { sawCnc, locked } = prior;
   // Parts on a Locked Board stay where they are; a Locked Saw Part keeps its reason.
   const lockedSaw = new Map(
-    locked.flatMap((b) => b.sawParts.filter((p) => !p.remade).map((p) => [p.partId, p.reason] as const)),
+    locked.flatMap((b) => b.sawParts.filter(isLive).map((p) => [p.partId, p.reason] as const)),
   );
   const lockedIds = new Set(locked.flatMap(livePartIds));
   const cnc: Part[] = [];

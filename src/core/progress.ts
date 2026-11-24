@@ -2,7 +2,7 @@
 // those ticks (PRD stories 9.1, 9.2, 9.6 and 9.7). Ticks are keyed by Export Part id and stored in the
 // Job document; roll-ups are always computed, never stored.
 import type { Job } from './job.ts';
-import { blankLocked, boardLocked, livePartIds, type Blank, type Board, type SheetPlan } from './planner/index.ts';
+import { blankLocked, boardLocked, isLive, livePartIds, type Blank, type Board, type SheetPlan } from './planner/index.ts';
 
 /** One tracked stage of a Part, in Run order. */
 export type Step = 'cut' | 'sideB' | 'banded' | 'manualOps';
@@ -46,7 +46,7 @@ export function apply(job: JobView, progress: Progress, event: ProgressEvent): P
     }
     case 'breakdownDone': {
       const board = boards(job).find((b) => b.id === event.boardId);
-      return tick(job, progress, board?.board.sawParts.filter((p) => !p.remade).map((p) => p.partId) ?? [], 'cut', event.at);
+      return tick(job, progress, board?.board.sawParts.filter(isLive).map((p) => p.partId) ?? [], 'cut', event.at);
     }
     case 'sideBDone': {
       const file = job.plan.sideB.find((f) => f.id === event.fileId);
@@ -75,7 +75,7 @@ const boardParts = livePartIds;
 
 /** A Blank's Parts, leaving out Remake Parts greyed on it. */
 function blankParts(blank: Blank): string[] {
-  return blank.parts.filter((p) => !p.remade).map((p) => p.partId);
+  return blank.parts.filter(isLive).map((p) => p.partId);
 }
 
 function tick(job: JobView, progress: Progress, partIds: readonly string[], step: Step, at: string): Progress {

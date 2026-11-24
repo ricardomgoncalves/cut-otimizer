@@ -2,7 +2,7 @@
 // in Run order, stuck on the Part's `bottom` face (the face that ends up hidden). Each label draws that face
 // as seen with the label up, says what the Part is, carries the QR code Scan mode reads, and a Step tick row.
 import type { CncOp, Model, Part, PartEdge } from '../model.ts';
-import type { Plan } from '../planner/index.ts';
+import { isLive, type Plan } from '../planner/index.ts';
 import { scanPayload, steps, type Step } from '../progress.ts';
 import { mmText } from './format.ts';
 import { GREY, WHITE, fitSize, text, tickBox } from './layout.ts';
@@ -188,14 +188,25 @@ export function labelOrder(plan: Plan): LabelEntry[] {
   const cnc: LabelEntry[] = [];
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
-      for (const p of board.sawParts.filter((x) => !x.remade)) saw.push({ partId: p.partId, where: `Saw · ${sheet.code} Board ${String(board.number)}` });
+      for (const p of board.sawParts.filter(isLive)) saw.push({ partId: p.partId, where: `Saw · ${sheet.code} Board ${String(board.number)}` });
       for (const blank of board.blanks) {
-        for (const p of blank.parts.filter((x) => !x.remade).sort((a, b) => a.n - b.n)) cnc.push({ partId: p.partId, where: `${blank.id} #${String(p.n)}` });
+        for (const p of blank.parts.filter(isLive).sort((a, b) => a.n - b.n)) cnc.push({ partId: p.partId, where: `${blank.id} #${String(p.n)}` });
       }
     }
     for (const id of sheet.unplaced) saw.push({ partId: id, where: 'Saw · too big for a Board' });
   }
   return [...saw, ...cnc];
+}
+
+/**
+ * "Print labels for this re-import": the label order (labelOrder) of just these Parts, then those not on
+ * any Board yet (waiting for a Regenerate), as needing nesting.
+ */
+export function reimportLabelOrder(plan: Plan, partIds: readonly string[]): LabelEntry[] {
+  const wanted = new Set(partIds);
+  const placed = labelOrder(plan).filter((e) => wanted.has(e.partId));
+  const listed = new Set(placed.map((e) => e.partId));
+  return [...placed, ...partIds.filter((id) => !listed.has(id)).map((partId) => ({ partId, where: 'needs nesting' }))];
 }
 
 /** The label sheets: 14 labels a sheet in label order (labelOrder), filling each row left to right. */

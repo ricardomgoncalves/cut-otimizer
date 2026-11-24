@@ -98,11 +98,12 @@ export type Face = ExportOp['face'];
 
 /**
  * An op done by hand, on paper only: an edge-face op (`edge`), a `bottom` op whose kind is set to manual
- * in Machine settings (`manualKind`, added by the Planner), or something the DXF grammar can't draw, such
- * as a mitred end or a diagonal groove (`notDrawable`).
+ * in Machine settings (`manualKind`, added by the Planner), something the DXF grammar can't draw, such
+ * as a mitred end or a diagonal groove (`notDrawable`), or a re-import change to a Part already cut that
+ * the maker chose to fix by hand (`fixByHand`, added from the Job document's `handFixes`).
  */
 export interface ManualOp {
-  reason: 'edge' | 'manualKind' | 'notDrawable';
+  reason: 'edge' | 'manualKind' | 'notDrawable' | 'fixByHand';
   face: Face;
   /**
    * Spelled out for the PDF and the label, in mm ("Drill Ø8 × 30 deep on x0 at y 260, z 9"). Edge-face ops

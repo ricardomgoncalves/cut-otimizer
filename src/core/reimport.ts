@@ -10,11 +10,24 @@
 // current Plan's Run order, new Parts in export order). The `name` is compared without its copy indices
 // (`s0.shelf[2]` and `s0.shelf[3]` pair). That catches renamed Generated Item Parts and
 // repeat-count renames.
+import { describeChange } from './change-text.ts';
+import { partLocations, partRunOrder } from './documents/work.ts';
 import { freeSheetCode } from './import/index.ts';
-import type { JobDocument } from './job-store/document.ts';
+import { withHandFixes, type JobDocument, type Spare } from './job-store/document.ts';
 import type { CncOp, ManualOp, Model, Owner, Part, PartEdges, Sheet } from './model.ts';
-import { livePartIds, type Plan } from './planner/index.ts';
-import { boardId } from './progress.ts';
+import {
+  blankLocked,
+  boardLocked,
+  isLive,
+  livePartIds,
+  remakePart,
+  sideB,
+  type Placement,
+  type Plan,
+  type SawPlacement,
+  type VoidReason,
+} from './planner/index.ts';
+import { boardId, type PartTicks, type Progress, type Step } from './progress.ts';
 
 export type Category = 'same' | 'renamed' | 'changedCut' | 'changedFinishing' | 'added' | 'removed';
 
@@ -58,7 +71,26 @@ export interface DiffEntry {
   where?: string;
   /** Empty for Same, Added and Removed. */
   changes: Change[];
+  /** What applying does to the work already done on it (Changed and Removed Parts; see `Treatment`). */
+  treatment?: Treatment;
+  /**
+   * Changed (finishing) only: a Step whose data changed was already ticked, so its tick is cleared
+   * ("banding changed after it was banded").
+   */
+  flags?: string[];
 }
+
+/**
+ * What a re-import does to a Changed or Removed Part's work (PRD 11.7–11.10):
+ * - `remake`: Changed (cut) and already ticked Cut: ticks cleared, greyed on its old Blank, nested again.
+ * - `fixByHand`: the maker's override of `remake`: ticks kept, plus an unticked Manual ops Step that
+ *   describes the change.
+ * - `nest`: Changed (cut), not cut yet: nested again (a greyed "moved to …" void on a Locked Blank).
+ * - `clearSteps`: Changed (finishing): only the Steps whose data changed are cleared.
+ * - `spare`: Removed, already cut: listed as a Spare until dismissed.
+ * - `drop`: Removed, not cut: dropped (a void on a Locked Blank).
+ */
+export type Treatment = 'remake' | 'fixByHand' | 'nest' | 'clearSteps' | 'spare' | 'drop';
 
 export interface Diff {
   hint: {
@@ -93,12 +125,16 @@ export interface Unpair {
 
 export interface DiffChoices {
   unpaired?: readonly Unpair[];
+  /** New ids of Changed (cut) Parts already cut that are fixed by hand instead of remade. */
+  fixByHand?: readonly string[];
 }
 
-/** What `diff` reads from the Job: its model and, once planned, its Plan. */
+/** What `diff` reads from the Job: its model, once planned its Plan, and its ticks. */
 export interface DiffJob {
   model: Model;
   plan: Plan | null;
+  /** The Job's ticks; none when left out. */
+  progress?: Progress;
 }
 
 export const LOW_OVERLAP = 0.5;
@@ -144,6 +180,8 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
   }
 
   const where = locations(job.plan);
+  const isCut = (oldId: string) => job.progress?.[oldId]?.cut !== undefined;
+  const fixByHand = new Set(choices.fixByHand ?? []);
   const ownerLabel = (owners: Map<string, Owner>, p: Part) => owners.get(p.ownerId)?.label ?? p.ownerId;
   const entries: DiffEntry[] = [];
   const renames: Record<string, string> = {};
@@ -156,8 +194,9 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
     const before = m.part;
     if (before.id !== p.id) renames[before.id] = p.id;
     const changes = changesOf(before, p, oldOwners, newOwners, changedSheets);
+    const category = categoryOf(changes);
     entries.push({
-      category: categoryOf(changes),
+      category,
       oldId: before.id,
       newId: p.id,
       paired: m.paired,
@@ -166,6 +205,8 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
       ownerLabel: ownerLabel(newOwners, p),
       ...withWhere(where.get(before.id)),
       changes,
+      ...treatmentOf(category, isCut(before.id), fixByHand.has(p.id)),
+      ...(category === 'changedFinishing' ? { flags: flagsOf(changes, job.progress?.[before.id]) } : {}),
     });
   }
   const matchedOld = new Set([...match.values()].map((m) => m.part.id));
@@ -179,6 +220,7 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
       ownerLabel: ownerLabel(oldOwners, p),
       ...withWhere(where.get(p.id)),
       changes: [],
+      treatment: isCut(p.id) ? 'spare' : 'drop',
     });
   }
   entries.sort((a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category));
@@ -214,11 +256,22 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
   };
 }
 
-/** The Parts a re-import leaves to nest at the next Regenerate: Added and Changed (cut), by new id. */
+/**
+ * The Parts a re-import leaves to nest at the next Regenerate, by new id: Added and Changed (cut), except
+ * those fixed by hand.
+ */
 export function needsNesting(d: Diff): string[] {
   return d.entries.flatMap((e) =>
-    (e.category === 'added' || e.category === 'changedCut') && e.newId !== undefined ? [e.newId] : [],
+    (e.category === 'added' || e.category === 'changedCut') && e.treatment !== 'fixByHand' && e.newId !== undefined
+      ? [e.newId]
+      : [],
   );
+}
+
+/** "Print labels for this re-import": the Renamed, Changed and Added Parts, by new id (diff order). */
+export function reimportLabelIds(d: Diff): string[] {
+  const kinds: readonly Category[] = ['renamed', 'changedCut', 'changedFinishing', 'added'];
+  return d.entries.flatMap((e) => (kinds.includes(e.category) && e.newId !== undefined ? [e.newId] : []));
 }
 
 /**
@@ -254,11 +307,19 @@ export interface NextExport {
  * - The raw export (and its file name) is replaced; the Job name and settings snapshot are unchanged.
  * - Sheet codes carry over by Sheet id. A derived code is re-derived only if its Sheet changed; an
  *   unchanged Sheet keeps its code even when Import would now derive another; new Sheets get derived codes.
- * - Ticks and Saw/CNC choices move to the new Part ids (Removed Parts keep their ticks under the old id), and
- *   the id alias records old -> new for good.
- * - The stored Plan stays (only Regenerate changes Blanks, Boards and Offcuts) with its Part ids moved, and
- *   is marked stale with the Parts that need nesting. An unplanned Job has nothing to mark.
- * - A re-import log entry is added, and the document as it was is kept for "Revert last re-import".
+ * - Ticks and Saw/CNC choices move to the new Part ids, and the id alias records old -> new for good.
+ * - Each Changed and Removed Part gets its `treatment` (see `Treatment`): a Remake is marked in the Plan
+ *   and its ticks cleared; Fix by hand keeps its ticks, adds a `handFixes` text and clears Manual ops;
+ *   Changed (finishing) clears Banded and/or Manual ops; a Removed Part already cut becomes a Spare
+ *   (ticks kept under its old id) and one never cut loses its ticks.
+ * - The stored Plan stays (only Regenerate changes Blanks, Boards and Offcuts) with its Part ids moved.
+ *   A Changed (cut) Part not cut yet, and a Removed Part, leaves a greyed void where it sits on a Locked
+ *   Blank (or a Locked Board, for a Saw Part), so that Blank's DXF and page don't change; anywhere else it
+ *   is taken off, so the next Regenerate nests it in the needs-nesting order. Side B files and Manual ops
+ *   are recomputed from the new export, so each Part's applicable Steps are. An unplanned Job has no Plan.
+ * - The Plan is marked stale with the Parts that need nesting.
+ * - A re-import log entry is added (with the label batch), and the document as it was is kept for
+ *   "Revert last re-import".
  */
 export function applyReimport(doc: JobDocument, current: Model, next: NextExport, d: Diff, now: string): JobDocument {
   const renames = d.renames;
@@ -268,16 +329,70 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
   );
   const carried = (doc.stale?.needsNesting ?? []).map((id) => renames[id] ?? id).filter((id) => live.has(id));
   const nesting = needsNesting(d);
+
+  const oldParts = new Map(current.parts.map((p) => [p.id, p]));
+  const newParts = new Map(next.model.parts.map((p) => [p.id, p]));
+  const oldWhere = locations(doc.plan);
+  let progress = renameKeys(doc.progress, renames);
+  let plan = doc.plan && renamePlanParts(doc.plan, renames);
+  const handFixes: Record<string, string[]> = Object.fromEntries(
+    Object.entries(renameKeys(doc.handFixes, renames)).filter(([id]) => live.has(id)),
+  );
+  const spares: Spare[] = doc.spares.filter((s) => !live.has(s.partId));
+  const vacate = new Map<string, VoidReason>();
+
+  for (const e of d.entries) {
+    const id = e.newId ?? e.oldId;
+    if (id === undefined) continue;
+    switch (e.treatment) {
+      case 'remake':
+        if (plan) plan = remakePart(plan, id);
+        progress = withoutPart(progress, id);
+        break;
+      case 'fixByHand': {
+        const before = e.oldId === undefined ? undefined : oldParts.get(e.oldId);
+        const after = newParts.get(id);
+        if (before && after) handFixes[id] = [...(handFixes[id] ?? []), describeChange(before, after, current, next.model)];
+        progress = withoutSteps(progress, id, ['manualOps']);
+        break;
+      }
+      case 'nest':
+        vacate.set(id, 'moved');
+        break;
+      case 'clearSteps':
+        progress = withoutSteps(progress, id, clearedSteps(e.changes));
+        break;
+      case 'spare': {
+        const before = oldParts.get(id);
+        if (before) spares.push(spareOf(before, oldWhere.get(id), now));
+        vacate.set(id, 'spare');
+        break;
+      }
+      case 'drop':
+        progress = withoutPart(progress, id);
+        vacate.set(id, 'removed');
+        break;
+      case undefined:
+        break;
+    }
+  }
+  if (plan) {
+    const cut = (id: string) => progress[id]?.cut !== undefined;
+    plan = withSteps(vacatePlan(plan, vacate, cut), withHandFixes(next.model, handFixes));
+  }
+
   return {
     ...doc,
     fileName: next.fileName,
     rawExport: next.rawExport,
     sheetCodes: carrySheetCodes(current, next.model, doc.sheetCodes, d.changedSheets),
     sawCncOverrides,
-    progress: renameKeys(doc.progress, renames),
-    plan: doc.plan && renamePlanParts(doc.plan, renames),
+    progress,
+    plan,
     stale: doc.plan ? { needsNesting: [...carried.filter((id) => !nesting.includes(id)), ...nesting] } : null,
     idAliases: extendAliases(doc.idAliases, renames),
+    handFixes,
+    spares,
     reimportLog: [
       ...doc.reimportLog,
       {
@@ -285,11 +400,111 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
         ...(next.model.exportedAt === undefined ? {} : { exportedAt: next.model.exportedAt }),
         fileName: next.fileName,
         counts: d.counts,
+        labelIds: reimportLabelIds(d),
       },
     ],
     previous: { ...doc, previous: null },
     updatedAt: now,
   };
+}
+
+/** The Steps a Changed (finishing) Part loses: Banded when its Edgebands changed, Manual ops when those did. */
+export function clearedSteps(changes: readonly Change[]): Step[] {
+  return [
+    ...(changes.includes('edgebands') ? (['banded'] as const) : []),
+    ...(changes.includes('manualOps') ? (['manualOps'] as const) : []),
+  ];
+}
+
+function withoutPart(progress: Progress, id: string): Progress {
+  return Object.fromEntries(Object.entries(progress).filter(([key]) => key !== id));
+}
+
+function withoutSteps(progress: Progress, id: string, clear: readonly Step[]): Progress {
+  const ticks = progress[id];
+  if (!ticks) return progress;
+  const rest: PartTicks = Object.fromEntries(
+    Object.entries(ticks).filter(([step]) => !(clear as readonly string[]).includes(step)),
+  );
+  const out = withoutPart(progress, id);
+  if (Object.keys(rest).length > 0) out[id] = rest;
+  return out;
+}
+
+function spareOf(part: Part, where: string | undefined, at: string): Spare {
+  return {
+    partId: part.id,
+    displayName: part.displayName,
+    cutLength: part.cutLength,
+    cutWidth: part.cutWidth,
+    thickness: part.thickness,
+    ...(where === undefined ? {} : { where }),
+    at,
+  };
+}
+
+/**
+ * Takes Parts off the stale Plan. On a Locked Blank (a Saw Part: on a Locked Board) the placement stays as
+ * a greyed void, so nothing there is redrawn; anywhere else it goes, so the next Regenerate nests it.
+ */
+function vacatePlan(plan: Plan, vacate: ReadonlyMap<string, VoidReason>, isCut: (id: string) => boolean): Plan {
+  if (vacate.size === 0) return plan;
+  const mark = <T extends Placement | SawPlacement>(list: readonly T[], keep: boolean): T[] =>
+    list.flatMap((p) => {
+      const reason = vacate.get(p.partId);
+      if (reason === undefined || !isLive(p)) return [p];
+      return keep ? [{ ...p, voided: reason }] : [];
+    });
+  return {
+    ...plan,
+    sheets: plan.sheets.map((sheet) => ({
+      ...sheet,
+      boards: sheet.boards.map((board) => {
+        const locked = boardLocked(board, isCut);
+        return {
+          ...board,
+          blanks: board.blanks.map((blank) => ({
+            ...blank,
+            parts: mark(blank.parts, locked && blankLocked(blank, isCut)),
+          })),
+          sawParts: mark(board.sawParts, locked),
+        };
+      }),
+      unplaced: sheet.unplaced.filter((id) => !vacate.has(id)),
+    })),
+  };
+}
+
+/** The Plan with Side B files and Manual ops (so every Part's applicable Steps) recomputed for `model`. */
+function withSteps(plan: Plan, model: Model): Plan {
+  const order = partRunOrder(plan);
+  const placed = new Set(order);
+  const rest = model.parts.map((p) => p.id).filter((id) => !placed.has(id));
+  const { files, manualOps } = sideB(model, plan.settings, [...order, ...rest]);
+  return { ...plan, sideB: files, manualOps };
+}
+
+/**
+ * What a greyed void left by a re-import says (`Placement.voided`): "moved to W18-2-A #1" (or "moved: needs
+ * nesting" until a Regenerate nests it), "removed from the export", or "Spare". Undefined when the Part has
+ * no void in the Plan.
+ */
+export function voidText(plan: Plan, partId: string): string | undefined {
+  const reason = plan.sheets
+    .flatMap((s) => s.boards.flatMap((b) => [...b.blanks.flatMap((x) => x.parts), ...b.sawParts]))
+    .find((p) => p.partId === partId && p.voided !== undefined)?.voided;
+  switch (reason) {
+    case undefined:
+      return undefined;
+    case 'moved': {
+      const where = partLocations(plan).get(partId);
+      return where === undefined || where === 'needs nesting' ? 'moved: needs nesting' : `moved to ${where}`;
+    }
+    case 'removed':
+      return 'removed from the export';
+    case 'spare':
+      return 'Spare';
+  }
 }
 
 /** "Revert last re-import": the document as it was before it, or null when there's nothing to revert. */
@@ -356,6 +571,21 @@ function carrySheetCodes(
   return out;
 }
 
+const FLAGS: Partial<Record<Step, string>> = {
+  banded: 'banding changed after it was banded',
+  manualOps: 'Manual ops changed after they were done',
+};
+
+function flagsOf(changes: readonly Change[], ticks: PartTicks | undefined): string[] {
+  return clearedSteps(changes).flatMap((step) => (ticks?.[step] === undefined ? [] : [FLAGS[step] ?? step]));
+}
+
+function treatmentOf(category: Category, cut: boolean, fixByHand: boolean): { treatment?: Treatment } {
+  if (category === 'changedCut') return { treatment: cut ? (fixByHand ? 'fixByHand' : 'remake') : 'nest' };
+  if (category === 'changedFinishing') return { treatment: 'clearSteps' };
+  return {};
+}
+
 function categoryOf(changes: readonly Change[]): Category {
   if (changes.some((c) => CUT_CHANGES.includes(c))) return 'changedCut';
   if (changes.some((c) => FINISHING_CHANGES.includes(c))) return 'changedFinishing';
@@ -407,7 +637,9 @@ const pathOf = (name: string) => name.replace(/\[[\d,\s]*\]/g, '');
 
 const cncOps = (p: Part): { top: CncOp[]; bottom: CncOp[] } => ({ top: p.top, bottom: p.bottom });
 const edges = (e: PartEdges) => [e.x0 ?? null, e.xL ?? null, e.y0 ?? null, e.yW ?? null];
-const manualOps = (ops: readonly ManualOp[]) => ops.map((o) => [o.reason, o.face, o.text]);
+/** Manual ops from the export: a Fix by hand text (`handFixes`) is the Job's, not the export's. */
+const manualOps = (ops: readonly ManualOp[]) =>
+  ops.filter((o) => o.reason !== 'fixByHand').map((o) => [o.reason, o.face, o.text]);
 
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -441,9 +673,9 @@ function locations(plan: Plan | null): Map<string, string> {
     for (const board of sheet.boards) {
       // A Remake Part greyed on its old Blank (#37) is not cut there any more.
       for (const blank of board.blanks) {
-        for (const p of blank.parts) if (!p.remade) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+        for (const p of blank.parts) if (isLive(p)) where.set(p.partId, `${blank.id} #${String(p.n)}`);
       }
-      for (const p of board.sawParts) if (!p.remade) where.set(p.partId, `Saw · ${boardId(sheet, board)}`);
+      for (const p of board.sawParts) if (isLive(p)) where.set(p.partId, `Saw · ${boardId(sheet, board)}`);
     }
   }
   return where;

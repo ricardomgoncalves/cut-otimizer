@@ -366,6 +366,7 @@ describe('Applying a re-import', () => {
         exportedAt: '2026-11-24T12:00:00Z',
         fileName: 'kitchen-v2.parts.json',
         counts: { changedCut: 0, changedFinishing: 0, added: 0, removed: 0, renamed: 1, same: 4 },
+        labelIds: [NEW_TOE],
       },
     ]);
   });

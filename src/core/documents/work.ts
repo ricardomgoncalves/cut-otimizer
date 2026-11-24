@@ -1,7 +1,7 @@
 // Shared pieces of the cut sheet's pages: the work-page header, the numbered sections (the cover's
 // "Order of work"), Part Run order and locations, and the cells every Part table repeats.
 import type { Model, Part, PartEdge } from '../model.ts';
-import { livePartIds, type Blank, type Plan, type SheetPlan } from '../planner/index.ts';
+import { isLive, livePartIds, type Blank, type Placement, type Plan, type SawPlacement, type SheetPlan } from '../planner/index.ts';
 import { steps, type Step } from '../progress.ts';
 import { sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, GREY, MARGIN, text, type Cell, type Column } from './layout.ts';
@@ -78,11 +78,15 @@ export function partRunOrder(plan: Plan): string[] {
   ]);
 }
 
-/** A Sheet's Parts on no Board that need nesting: greyed Remakes not placed again, then overflow. */
+/**
+ * A Sheet's Parts on no Board that need nesting: greyed Remakes and "moved" voids not placed again, then
+ * overflow.
+ */
 function waitingIds(sheet: SheetPlan, live: Set<string>): string[] {
+  const waits = (p: Placement | SawPlacement) => p.remade === true || p.voided === 'moved';
   const greyed = sheet.boards.flatMap((b) => [
-    ...b.blanks.flatMap((x) => x.parts.filter((p) => p.remade).map((p) => p.partId)),
-    ...b.sawParts.filter((p) => p.remade).map((p) => p.partId),
+    ...b.blanks.flatMap((x) => x.parts.filter(waits).map((p) => p.partId)),
+    ...b.sawParts.filter(waits).map((p) => p.partId),
   ]);
   return [...new Set([...greyed, ...(sheet.overflow ?? [])])].filter((id) => !live.has(id));
 }
@@ -98,9 +102,9 @@ export function partLocations(plan: Plan): Map<string, string> {
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
       for (const blank of board.blanks) {
-        for (const p of blank.parts) if (!p.remade) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+        for (const p of blank.parts) if (isLive(p)) where.set(p.partId, `${blank.id} #${String(p.n)}`);
       }
-      for (const p of board.sawParts) if (!p.remade) where.set(p.partId, `${sheet.code}-${String(board.number)} saw`);
+      for (const p of board.sawParts) if (isLive(p)) where.set(p.partId, `${sheet.code}-${String(board.number)} saw`);
     }
     for (const id of sheet.unplaced) where.set(id, `${sheet.code} saw, no Board`);
     for (const id of waitingIds(sheet, live)) where.set(id, 'needs nesting');

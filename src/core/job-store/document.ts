@@ -62,6 +62,28 @@ export interface JobDocument {
    * dropped: one level only. Cleared by the next re-plan (`withJob`); replaced by the next re-import.
    */
   previous: JobDocument | null;
+  /**
+   * "Fix by hand" texts by Part id: a Changed (cut) Part already cut that keeps its ticks and gets a Manual
+   * op describing the change ("now 596 wide"). Added to the model as `fixByHand` Manual ops on open.
+   */
+  handFixes: Record<string, string[]>;
+  /** Removed Parts already cut, until dismissed (reimport.ts). Left out of every roll-up. */
+  spares: Spare[];
+}
+
+/** A cut piece whose Part a re-import removed: listed so it can be found and set aside. */
+export interface Spare {
+  /** Its old Export Part id (its ticks stay under it, so its Locked Blank stays Locked). */
+  partId: string;
+  /** Its old display name. */
+  displayName: string;
+  cutLength: number;
+  cutWidth: number;
+  thickness: number;
+  /** Where it was cut (`W18-1-A #2`, `Saw · W18-1`), when it was on a Board. */
+  where?: string;
+  /** When the re-import that removed it was applied. */
+  at: string;
 }
 
 export interface ReimportLogEntry {
@@ -71,6 +93,8 @@ export interface ReimportLogEntry {
   exportedAt?: string;
   fileName: string;
   counts: Record<Category, number>;
+  /** "Print labels for this re-import": Renamed, Changed and Added Parts, by new id. */
+  labelIds?: string[];
 }
 
 /** A step from `jobFormat` n to n + 1, keyed by n. */
@@ -113,6 +137,8 @@ export function createJobDocument({ id, shortId, rawExport, fileName, model, set
     reimportLog: [],
     stale: null,
     previous: null,
+    handFixes: {},
+    spares: [],
   };
 }
 
@@ -133,8 +159,10 @@ export function openJobDocument(doc: JobDocument): OpenedJob | { error: string }
   } catch {
     return { error: `The export saved in ${doc.name} is not JSON.` };
   }
-  const { model, issues } = importExport(json);
-  if (!model) return { error: `The export saved in ${doc.name} is not a valid Parts Export v1.` };
+  const imported = importExport(json);
+  if (!imported.model) return { error: `The export saved in ${doc.name} is not a valid Parts Export v1.` };
+  const { issues } = imported;
+  const model = withHandFixes(imported.model, doc.handFixes);
   const job: Job | null = doc.plan
     ? {
         model,
@@ -145,6 +173,26 @@ export function openJobDocument(doc: JobDocument): OpenedJob | { error: string }
       }
     : null;
   return { model, issues, job };
+}
+
+/** The model with each Part's "Fix by hand" texts added as `fixByHand` Manual ops. */
+export function withHandFixes(model: Model, handFixes: Readonly<Record<string, readonly string[]>>): Model {
+  if (Object.keys(handFixes).length === 0) return model;
+  return {
+    ...model,
+    parts: model.parts.map((p) => {
+      const fixes = handFixes[p.id];
+      return fixes
+        ? { ...p, manualOps: [...p.manualOps, ...fixes.map((text) => ({ reason: 'fixByHand' as const, face: 'top' as const, text }))] }
+        : p;
+    }),
+  };
+}
+
+/** Dismisses a Spare: it is set aside and no longer listed. */
+export function dismissSpare(doc: JobDocument, partId: string, now: string): JobDocument {
+  if (!doc.spares.some((s) => s.partId === partId)) return doc;
+  return { ...doc, spares: doc.spares.filter((s) => s.partId !== partId), updatedAt: now };
 }
 
 /**
@@ -273,7 +321,15 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
     reimportLog: [],
     stale: null,
     previous: null,
+    handFixes: {},
+    spares: [],
   };
+  const fixes = raw['handFixes'] ?? {};
+  if (isRecord(fixes) && Object.values(fixes).every(isStringList)) doc.handFixes = fixes as Record<string, string[]>;
+  else problems.push('handFixes must map Part ids to lists of text');
+  const spares = raw['spares'] ?? [];
+  if (Array.isArray(spares) && spares.every(isSpare)) doc.spares = spares;
+  else problems.push('spares must be a list of Spares');
   const log = raw['reimportLog'] ?? [];
   if (Array.isArray(log) && log.every(isLogEntry)) doc.reimportLog = log;
   else problems.push('reimportLog must be a list of re-imports');
@@ -298,12 +354,26 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
   return { doc };
 }
 
+function isSpare(v: unknown): v is Spare {
+  return (
+    isRecord(v) &&
+    typeof v['partId'] === 'string' &&
+    typeof v['displayName'] === 'string' &&
+    typeof v['cutLength'] === 'number' &&
+    typeof v['cutWidth'] === 'number' &&
+    typeof v['thickness'] === 'number' &&
+    (v['where'] === undefined || typeof v['where'] === 'string') &&
+    typeof v['at'] === 'string'
+  );
+}
+
 function isLogEntry(v: unknown): v is ReimportLogEntry {
   return (
     isRecord(v) &&
     typeof v['at'] === 'string' &&
     typeof v['fileName'] === 'string' &&
     (v['exportedAt'] === undefined || typeof v['exportedAt'] === 'string') &&
+    (v['labelIds'] === undefined || isStringList(v['labelIds'])) &&
     isRecord(v['counts']) &&
     Object.values(v['counts']).every((n) => typeof n === 'number')
   );
