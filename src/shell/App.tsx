@@ -29,7 +29,7 @@ import {
   withProgress,
   type JobDocument,
 } from '../core/job-store/document.ts';
-import type { JobSummary } from '../core/job-store/store.ts';
+import { openFileDecision, type JobSummary } from '../core/job-store/store.ts';
 import type { Model, Part } from '../core/model.ts';
 import { isLive, type PartMode, type SawReason, type SheetPlan, type SideBFile } from '../core/planner/index.ts';
 import {
@@ -123,6 +123,8 @@ export function App() {
   const [pendingUntick, setPendingUntick] = useState<{ partId: string; step: Step; unlocks: string[] } | null>(null);
   const [pendingRemake, setPendingRemake] = useState<string | null>(null);
   const [reimport, setReimport] = useState<PendingReimport | null>(null);
+  /** A .job.json whose saved copy is older, waiting for "Replace". */
+  const [pendingReplace, setPendingReplace] = useState<{ doc: JobDocument; question: string } | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -171,6 +173,7 @@ export function App() {
 
   function resetMessages() {
     setPendingUntick(null);
+    setPendingReplace(null);
     setReimport(null);
     setIssues([]);
     setLoadError(null);
@@ -301,11 +304,13 @@ export function App() {
       setLoadError(`${file.name}: ${read.error}`);
       return;
     }
-    // The same Job (same UUID) replaces its saved copy. Another Job's short id is never reused.
-    let doc = read.doc;
-    const taken = jobs.filter((j) => j.id !== doc.id).map((j) => j.shortId);
-    if (taken.includes(doc.shortId)) doc = { ...doc, shortId: shortIdFor(doc.id, taken) };
-    openDocument(doc, true);
+    // Never loses work and never rewrites a short id: a newer saved copy wins, an older one is replaced
+    // only after asking, and a short id another Job uses is refused.
+    const decision = openFileDecision(read.doc, jobs);
+    if (decision.kind === 'new') openDocument(read.doc, true);
+    else if (decision.kind === 'same') await onOpenStored(read.doc.id);
+    else if (decision.kind === 'replace') setPendingReplace({ doc: read.doc, question: decision.question });
+    else setLoadError(`${file.name}: ${decision.reason}`);
   }
 
   async function onOpenStored(id: string) {
@@ -565,6 +570,29 @@ export function App() {
         onArchive={(id, archived) => void onArchive(id, archived)}
         onDelete={(id) => void onDelete(id)}
       />
+
+      {pendingReplace && (
+        <div role="alertdialog" aria-label="Confirm replace" className="warning-box">
+          <p>{pendingReplace.question}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setPendingReplace(null);
+              openDocument(pendingReplace.doc, true);
+            }}
+          >
+            Replace
+          </button>{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setPendingReplace(null);
+            }}
+          >
+            Keep saved copy
+          </button>
+        </div>
+      )}
 
       {loadError && (
         <div role="alert" className="error">

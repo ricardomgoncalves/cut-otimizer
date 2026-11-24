@@ -13,7 +13,7 @@ import {
   withProgress,
   type JobDocument,
 } from '../src/core/job-store/document.ts';
-import { createMemoryJobStore, type JobStore } from '../src/core/job-store/store.ts';
+import { createMemoryJobStore, openFileDecision, summarize, type JobStore } from '../src/core/job-store/store.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 import { createDexieJobStore } from '../src/shell/job-store-dexie.ts';
 
@@ -119,5 +119,42 @@ describe.each(adapters)('JobStore (%s)', (_name, makeStore) => {
     got.name = 'mutated';
     got.sheetCodes['x'] = 'Y';
     expect(await store.get(A().id)).toEqual(A());
+  });
+});
+
+describe('opening a .job.json into the Job list', () => {
+  const later = '2026-11-22T09:00:00.000Z';
+
+  it('adds a Job this browser does not have', () => {
+    expect(openFileDecision(A(), [summarize(B())])).toEqual({ kind: 'new' });
+  });
+
+  it('opens the saved copy as it is when the file is the same version of the Job', () => {
+    expect(openFileDecision(A(), [summarize(A())])).toEqual({ kind: 'same' });
+  });
+
+  it('asks before replacing an older saved copy', () => {
+    const file = renameJob(A(), 'Kitchen', later);
+    expect(openFileDecision(file, [summarize(A())])).toEqual({
+      kind: 'replace',
+      question: `Replace the copy of ${A().name} saved in this browser (changed 2026-11-20 09:00 UTC) with this file (changed 2026-11-22 09:00 UTC)?`,
+    });
+  });
+
+  it('refuses to overwrite a saved copy changed after the file', () => {
+    const saved = renameJob(A(), 'Kitchen', later);
+    expect(openFileDecision(A(), [summarize(saved)])).toEqual({
+      kind: 'refuse',
+      reason:
+        'The copy of Kitchen saved in this browser was changed after this file (2026-11-22 09:00 UTC, the file 2026-11-20 09:00 UTC), so the file was not opened. Download the saved copy and delete it first if you want the file instead.',
+    });
+  });
+
+  it('refuses another Job with a short id already in use, since its labels would scan into the wrong Job', () => {
+    const clash = { ...B(), shortId: 'AAAA' };
+    expect(openFileDecision(clash, [summarize(A())])).toEqual({
+      kind: 'refuse',
+      reason: `This Job's short id AAAA is already used by ${A().name} in this browser. Its printed labels carry that id, so it can't be changed, and the file was not opened.`,
+    });
   });
 });

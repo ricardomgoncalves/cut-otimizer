@@ -87,6 +87,37 @@ test('Download Job and Open Job move a Job to another browser', async ({ page, b
   await other.close();
 });
 
+test('Open Job never overwrites newer work, and asks before replacing an older saved copy', async ({ page, browser }, testInfo) => {
+  await createJob(page);
+  const first = testInfo.outputPath('first.job.json');
+  writeFileSync(first, (await downloadJob(page)).text);
+  await page.getByLabel('Job name').fill('Kitchen carcasses');
+  await page.getByLabel('Job name').press('Enter');
+  await expect(page.getByRole('region', { name: 'Jobs' })).toContainText('Kitchen carcasses');
+  const second = testInfo.outputPath('second.job.json');
+  writeFileSync(second, (await downloadJob(page)).text);
+
+  // The saved copy changed after the first file: refused, nothing lost.
+  await page.getByLabel('Open Job').setInputFiles(first);
+  await expect(page.getByRole('alert')).toContainText('changed after this file');
+  await page.reload();
+  await expect(page.getByLabel('Job name')).toHaveValue('Kitchen carcasses');
+
+  // Another browser has the older copy: the newer file replaces it only after asking.
+  const other = await browser.newPage();
+  await other.goto('/');
+  await other.getByLabel('Open Job').setInputFiles(first);
+  await expect(other.getByLabel('Job name')).toHaveValue(`Synthetic fixture ${today()}`);
+  await other.getByLabel('Open Job').setInputFiles(second);
+  const ask = other.getByRole('alertdialog', { name: 'Confirm replace' });
+  await ask.getByRole('button', { name: 'Keep saved copy' }).click();
+  await expect(other.getByLabel('Job name')).toHaveValue(`Synthetic fixture ${today()}`);
+  await other.getByLabel('Open Job').setInputFiles(second);
+  await ask.getByRole('button', { name: 'Replace' }).click();
+  await expect(other.getByLabel('Job name')).toHaveValue('Kitchen carcasses');
+  await other.close();
+});
+
 test('a .job.json whose Plan is from an older version opens as stale until Regenerate', async ({ page, browser }, testInfo) => {
   await createJob(page);
   const file = JSON.parse((await downloadJob(page)).text) as {
