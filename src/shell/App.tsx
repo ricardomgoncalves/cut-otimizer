@@ -592,9 +592,9 @@ export function App() {
           {open?.doc.stale && (
             <div role="status" aria-label="Export updated" className="stale warning-box">
               <p>
-                Export updated, {open.doc.stale.needsNesting.length} Part
-                {open.doc.stale.needsNesting.length === 1 ? '' : 's'} need nesting. The Layouts below are from the
-                previous export until you regenerate.
+                Export updated, {open.doc.stale.needsNesting.length}{' '}
+                {open.doc.stale.needsNesting.length === 1 ? 'Part needs' : 'Parts need'} nesting. The Layouts below
+                are from the previous export until you regenerate.
               </p>
               {open.doc.stale.needsNesting.length > 0 && (
                 <ul>
