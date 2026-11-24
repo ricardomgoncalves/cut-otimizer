@@ -13,6 +13,11 @@
         --part: #1f5f99;
         --part-bg: #dbe9f6;
         --blank-bg: #f6f3ec;
+        --saw-bg: #e3f0d9;
+        --offcut-bg: #fbf3d5;
+        --waste-bg: #ececec;
+        --cut: #c0392b;
+        --warn: #b35900;
         --error: #b00020;
       }
       @media (prefers-color-scheme: dark) {
@@ -23,6 +28,11 @@
           --part: #8cc0ef;
           --part-bg: #1d3347;
           --blank-bg: #2a2722;
+          --saw-bg: #233522;
+          --offcut-bg: #3a3420;
+          --waste-bg: #222;
+          --cut: #ff7a6b;
+          --warn: #ffb066;
           --error: #ff6b81;
         }
       }
@@ -37,6 +47,23 @@
       }
       figure {
         margin: 1rem 0;
+      }
+      .warn {
+        color: var(--warn);
+      }
+      svg {
+        max-width: 100%;
+        height: auto;
+      }
+      table {
+        border-collapse: collapse;
+        margin: 0.5rem 0;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 2px 8px;
+        border-bottom: 1px solid var(--waste-bg);
       }
     </style>
   </head>

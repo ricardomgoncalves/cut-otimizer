@@ -39,9 +39,18 @@ export function BlankLayout({ blank, clampMargin }: Props) {
         const x = mm(p.x);
         const y = flipY(mm(p.y), h);
         return (
-          <g key={p.partId}>
-            <title>{`#${String(p.n)} ${p.partId}`}</title>
-            <rect x={x} y={y} width={w} height={h} fill="var(--part-bg)" stroke="var(--part)" strokeWidth={2} />
+          <g key={p.partId} className={p.narrow ? 'narrow' : undefined}>
+            <title>{`#${String(p.n)} ${p.partId}${p.narrow ? ' (narrow: check tabs)' : ''}`}</title>
+            <rect
+              x={x}
+              y={y}
+              width={w}
+              height={h}
+              fill="var(--part-bg)"
+              stroke={p.narrow ? 'var(--warn)' : 'var(--part)'}
+              strokeWidth={p.narrow ? 4 : 2}
+              strokeDasharray={p.narrow ? '10 5' : undefined}
+            />
             <text
               x={x + w / 2}
               y={y + h / 2}
@@ -50,7 +59,7 @@ export function BlankLayout({ blank, clampMargin }: Props) {
               fontSize={Math.max(14, Math.min(48, h * 0.4, w * 0.25))}
               fill="var(--text)"
             >
-              {`#${String(p.n)}`}
+              {`#${String(p.n)}${p.narrow ? ' !' : ''}`}
             </text>
           </g>
         );

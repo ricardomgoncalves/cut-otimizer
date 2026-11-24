@@ -2,9 +2,20 @@ import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { APP_NAME } from '../core/app.ts';
 import { toDxfFiles } from '../core/dxf/index.ts';
 import { importExport, type ImportIssue } from '../core/import/index.ts';
-import { generateJob, regenerate, setSheetCode, sheetCode, snapshotChanges, type Job } from '../core/job.ts';
+import {
+  generateJob,
+  regenerate,
+  setPartMode,
+  setSheetCode,
+  sheetCode,
+  snapshotChanges,
+  type Job,
+} from '../core/job.ts';
+import type { Model } from '../core/model.ts';
+import type { PartMode, SawReason, SheetPlan } from '../core/planner/index.ts';
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
+import { BoardBreakdown } from './BoardBreakdown.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
@@ -61,6 +72,17 @@ export function App() {
   function onSheetCode(sheetId: string, code: string) {
     if (!job) return;
     const result = setSheetCode(job, sheetId, code);
+    if ('error' in result) {
+      setCodeError(result.error);
+      return;
+    }
+    setCodeError(null);
+    setJob({ fileName: job.fileName, ...result.job });
+  }
+
+  function onPartMode(partId: string, mode: PartMode) {
+    if (!job) return;
+    const result = setPartMode(job, partId, mode);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -188,14 +210,11 @@ export function App() {
                   onSheetCode(sheet.sheetId, code);
                 }}
               />
-              {sheet.sawParts.length > 0 && (
-                <p>
-                  Saw Parts:{' '}
-                  {sheet.sawParts.map((id) => (
-                    <code key={id}>{id} </code>
-                  ))}
-                </p>
-              )}
+              <h4>Breakdown</h4>
+              {sheet.boards.map((board) => (
+                <BoardBreakdown key={board.number} code={sheet.code} board={board} nameOf={(id) => id} />
+              ))}
+              <h4>Layouts</h4>
               {sheet.boards.flatMap((board) =>
                 board.blanks.map((blank) => (
                   <figure key={blank.id}>
@@ -209,12 +228,14 @@ export function App() {
                         <li key={p.partId} value={p.n}>
                           <code>{p.partId}</code> {p.cutLength / 1000} × {p.cutWidth / 1000}
                           {p.rotated ? ' (turned)' : ''}
+                          {p.narrow && <span className="warn"> · narrow: check tabs</span>}
                         </li>
                       ))}
                     </ol>
                   </figure>
                 )),
               )}
+              <PartList model={job.model} sheet={sheet} onMode={onPartMode} />
             </section>
           ))}
         </>
@@ -248,5 +269,75 @@ function SheetCodeField(props: { code: string; sheetName: string; onCommit: (cod
         />
       </label>
     </form>
+  );
+}
+
+const SAW_REASONS: Record<SawReason, string> = {
+  oversize: 'bigger than the bed',
+  narrow: 'narrow',
+  chosen: 'chosen',
+};
+
+/** Every Part of a Sheet with where it is cut, the narrow warning and the Saw / CNC toggle. */
+function PartList(props: { model: Model; sheet: SheetPlan; onMode: (partId: string, mode: PartMode) => void }) {
+  const { model, sheet } = props;
+  const where = new Map<string, { text: string; narrow: boolean }>();
+  for (const board of sheet.boards) {
+    for (const blank of board.blanks) {
+      for (const p of blank.parts) where.set(p.partId, { text: `${blank.id} #${String(p.n)}`, narrow: p.narrow });
+    }
+    for (const p of board.sawParts) {
+      where.set(p.partId, { text: `Saw · Board ${String(board.number)} (${SAW_REASONS[p.reason]})`, narrow: false });
+    }
+  }
+  for (const id of sheet.unplaced) where.set(id, { text: 'Saw · too big for a Board', narrow: false });
+
+  return (
+    <table aria-label={`Parts of ${sheet.code}`}>
+      <thead>
+        <tr>
+          <th scope="col">Part</th>
+          <th scope="col">Cut size (mm)</th>
+          <th scope="col">Where</th>
+          <th scope="col">Saw / CNC</th>
+        </tr>
+      </thead>
+      <tbody>
+        {model.parts
+          .filter((p) => p.sheetId === sheet.sheetId)
+          .map((p) => {
+            const at = where.get(p.id);
+            const saw = sheet.sawParts.includes(p.id);
+            const fixed = sheet.sawReasons[p.id] === 'oversize';
+            return (
+              <tr key={p.id}>
+                <td>
+                  <code>{p.id}</code>
+                </td>
+                <td>
+                  {p.cutLength / 1000} × {p.cutWidth / 1000}
+                </td>
+                <td>
+                  {at?.text}
+                  {at?.narrow && <span className="warn"> · narrow: check tabs</span>}
+                </td>
+                <td>
+                  <label title={fixed ? 'Bigger than the usable bed: always cut on the saw' : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={saw}
+                      disabled={fixed}
+                      onChange={(e) => {
+                        props.onMode(p.id, e.target.checked ? 'saw' : 'cnc');
+                      }}
+                    />{' '}
+                    Saw
+                  </label>
+                </td>
+              </tr>
+            );
+          })}
+      </tbody>
+    </table>
   );
 }
