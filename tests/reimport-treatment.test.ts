@@ -3,7 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { PartsExport } from '../src/core/import/parts-export.v1.generated.ts';
-import { labelOrder, partLocations, reimportLabelOrder } from '../src/core/documents/index.ts';
+import { partLocations } from '../src/core/documents/index.ts';
+import { labelOrder, reimportLabelOrder } from '../src/core/documents/labels.ts';
 import { toDxfFiles } from '../src/core/dxf/index.ts';
 import { importExport } from '../src/core/import/index.ts';
 import { generateJob, needsNesting as needsNestingOf, regenerate, remake, type Job } from '../src/core/job.ts';
@@ -20,7 +21,7 @@ import {
 import type { Model } from '../src/core/model.ts';
 import type { Placement, Plan, SawPlacement } from '../src/core/planner/index.ts';
 import { apply, rollup, steps, type Progress, type ProgressEvent } from '../src/core/progress.ts';
-import { applyReimport, diff, voidText, type DiffChoices } from '../src/core/reimport.ts';
+import { applyDiff, diff, voidText, type DiffChoices } from '../src/core/reimport.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 
 // The synthetic fixture, planned with default settings:
@@ -97,7 +98,7 @@ function reimport(doc: JobDocument, file: PartsExport, choices: DiffChoices = {}
   if ('error' in o) throw new Error(o.error);
   const next = modelOf(file);
   const d = diff({ model: o.model, plan: doc.plan, progress: doc.progress }, next, choices);
-  return applyReimport(doc, o.model, { rawExport: JSON.stringify(file), fileName: 'v2.parts.json', model: next }, d, LATER);
+  return applyDiff(doc, o.model, { rawExport: JSON.stringify(file), fileName: 'v2.parts.json', model: next }, d, LATER);
 }
 
 /** Every placement of a Part in a Plan, on a Blank (with its Blank id) or as a Saw Part. */

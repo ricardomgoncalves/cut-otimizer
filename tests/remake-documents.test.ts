@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { labelOrder, partLocations, partRunOrder } from '../src/core/documents/index.ts';
+import { partLocations } from '../src/core/documents/index.ts';
+import { labelOrder } from '../src/core/documents/labels.ts';
+import { partRunOrder } from '../src/core/documents/work.ts';
 import { importExport } from '../src/core/import/index.ts';
 import { generateJob, regenerate, remake } from '../src/core/job.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';

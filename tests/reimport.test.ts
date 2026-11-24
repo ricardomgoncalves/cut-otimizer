@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { PartsExport } from '../src/core/import/parts-export.v1.generated.ts';
 import { importExport } from '../src/core/import/index.ts';
-import { applyReimport, diff, revertReimport } from '../src/core/reimport.ts';
+import { applyDiff, diff, revertReimport } from '../src/core/reimport.ts';
 import { generateJob, regenerate, sheetCode, type Job } from '../src/core/job.ts';
 import {
   createJobDocument,
@@ -267,7 +267,7 @@ function reimport(doc: JobDocument, file: PartsExport, fileName = 'kitchen-v2.pa
   if ('error' in opened) throw new Error(opened.error);
   const next = modelOf(file);
   const d = diff({ model: opened.model, plan: doc.plan }, next);
-  return applyReimport(doc, opened.model, { rawExport: JSON.stringify(file), fileName, model: next }, d, LATER);
+  return applyDiff(doc, opened.model, { rawExport: JSON.stringify(file), fileName, model: next }, d, LATER);
 }
 
 function tickedDocument(partId: string): JobDocument {

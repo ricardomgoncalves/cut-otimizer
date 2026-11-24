@@ -1,7 +1,7 @@
 // Re-import: loading an updated Parts Export into a Job that already has one (PRD stories 11.1–11.6,
 // 11.11 and 11.12). `diff` matches the Job's Parts with the new export's and sorts them into categories;
 // the maker reviews that, may unpair auto-paired Parts, and applies it all or nothing
-// (job-store/document.ts `applyReimport`). This slice changes the data only: Layouts go stale and only
+// (`applyDiff`). This slice changes the data only: Layouts go stale and only
 // Regenerate changes Blanks, Boards and Offcuts.
 //
 // Matching: exact Part id first. Then each leftover old Part and leftover new Part with the same Sheet,
@@ -272,7 +272,7 @@ function diffNestTargets(d: Diff): string[] {
 }
 
 /** "Print labels for this re-import": the Renamed, Changed and Added Parts, by new id (diff order). */
-export function reimportLabelIds(d: Diff): string[] {
+function reimportLabelIds(d: Diff): string[] {
   const kinds: readonly Category[] = ['renamed', 'changedCut', 'changedFinishing', 'added'];
   return d.entries.flatMap((e) => (kinds.includes(e.category) && e.newId !== undefined ? [e.newId] : []));
 }
@@ -282,7 +282,7 @@ export function reimportLabelIds(d: Diff): string[] {
  * old id maps straight to the current one. Earlier aliases follow
  * the new renames, and an id that is live again stops being an alias.
  */
-export function extendAliases(
+function extendAliases(
   aliases: Readonly<Record<string, string>>,
   renames: Readonly<Record<string, string>>,
 ): Record<string, string> {
@@ -324,7 +324,7 @@ export interface NextExport {
  * - A re-import log entry is added (with the label batch), and the document as it was is kept for
  *   "Revert last re-import".
  */
-export function applyReimport(doc: JobDocument, current: Model, next: NextExport, d: Diff, now: string): JobDocument {
+export function applyDiff(doc: JobDocument, current: Model, next: NextExport, d: Diff, now: string): JobDocument {
   const renames = d.renames;
   const live = new Set(next.model.parts.map((p) => p.id));
   const sawCncOverrides = Object.fromEntries(
@@ -548,7 +548,7 @@ function renamePlanParts(plan: Plan, renames: Readonly<Record<string, string>>):
   };
 }
 
-/** The Sheet code overrides after a re-import (see applyReimport). */
+/** The Sheet code overrides after a re-import (see applyDiff). */
 function carrySheetCodes(
   current: Model,
   next: Model,

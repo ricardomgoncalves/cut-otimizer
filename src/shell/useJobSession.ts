@@ -24,7 +24,7 @@ import { openFileDecision, type JobSummary } from '../core/job-store/store.ts';
 import type { Model } from '../core/model.ts';
 import type { PartMode, SideBFile } from '../core/planner/index.ts';
 import { apply, wouldUnlock, type Progress, type ProgressEvent, type Step } from '../core/progress.ts';
-import { applyReimport, diff, revertReimport, type Diff, type DiffEntry, type Unpair } from '../core/reimport.ts';
+import { applyDiff, diff, revertReimport, type Diff, type DiffEntry, type Unpair } from '../core/reimport.ts';
 import type { Settings } from '../core/settings.ts';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
 import { createDexieJobStore } from './job-store-dexie.ts';
@@ -440,7 +440,7 @@ export function useJobSession() {
     /** Applies the reviewed re-import, all or nothing, and reopens the Job from its new document. */
     applyReimport() {
       if (!open || !reimport) return;
-      const doc = applyReimport(open.doc, open.model, reimport, reviewDiffOf(open, reimport), now());
+      const doc = applyDiff(open.doc, open.model, reimport, reviewDiffOf(open, reimport), now());
       setReimport(null);
       reopen(doc);
     },

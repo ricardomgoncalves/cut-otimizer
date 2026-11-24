@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { cutSheet, pageToSvg, sawCuts, type CutSheetJob, type Page } from '../src/core/documents/index.ts';
+import { cutSheet, pageToSvg, type CutSheetJob, type Page } from '../src/core/documents/index.ts';
+import { sawCuts } from '../src/core/documents/saw.ts';
 import { importExport } from '../src/core/import/index.ts';
 import { plan, type Board, type Plan, type SheetPlan } from '../src/core/planner/index.ts';
 import { DEFAULT_SETTINGS, edgeTrimFor } from '../src/core/settings.ts';
