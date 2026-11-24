@@ -111,8 +111,12 @@ Describes a Part whose applicable Steps are all ticked. A Cabinet whose Parts ar
 _Avoid_: finished, complete
 
 **Remake**:
-Marking a ruined Part to be cut again: its ticks are cleared and it is re-nested onto a new Blank at the next regenerate, while its old Blank keeps it greyed out. The new Blank is cut from a kept Offcut of a Locked Board where one fits; otherwise the app asks before adding a Board to the Sheet.
+Marking a ruined Part to be cut again: its ticks are cleared and it is re-nested onto a new Blank at the next regenerate, while its old Blank keeps it greyed out. Like every Part that needs nesting, it goes first onto a kept Offcut of a Locked Board, then into the Breakdown of the Sheet's unlocked Boards; if neither fits, the app asks before adding a Board to the Sheet.
 _Avoid_: recut, redo
+
+**Spare**:
+A cut piece whose Part is no longer in the Job's Parts Export after a re-import. It is listed so it can be found and set aside, counts in no progress, and can be dismissed. It is never an Offcut and never stock.
+_Avoid_: orphan, leftover part
 
 **Manual op**:
 An op the CNC does not run: an edge-face op, a `bottom` op kind set to manual in Machine settings, or an op that can't be drawn as a hole or rectangle (a mitre, for example). It is printed on the cut sheet and the Part's label instead of going into a file for CAM.
