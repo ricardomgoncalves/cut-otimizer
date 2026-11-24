@@ -4,6 +4,7 @@ import { toDxfFiles } from '../src/core/dxf/index.ts';
 import { importExport } from '../src/core/import/index.ts';
 import { generateJob, regenerate, setPartMode, setSheetCode, sheetCode, snapshotChanges } from '../src/core/job.ts';
 import type { Model } from '../src/core/model.ts';
+import { apply, type Progress } from '../src/core/progress.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
 
 function syntheticModel(): Model {
@@ -150,5 +151,55 @@ describe('Saw / CNC toggle', () => {
     expect(setPartMode(job, 'c1/leftSide', 'cnc')).toEqual({
       error: 'This Part is bigger than the usable bed, so it is always cut on the saw.',
     });
+  });
+});
+
+describe('Locked Boards and Blanks on regenerate', () => {
+  const SHELF = 'c1/s0.shelf[0]';
+  const T1 = '2026-11-24T10:00:00.000Z';
+  const shelfCut: Progress = { [SHELF]: { cut: T1 } };
+  const edited: Settings = { ...DEFAULT_SETTINGS, clampMargin: 60000 };
+
+  it('keeps a Locked Blank and its DXF byte for byte, and re-plans the rest with the new snapshot', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    const before = toDxfFiles(job.plan, 'J1');
+    const regenerated = regenerate(job, edited, shelfCut);
+
+    expect(regenerated.settings).toEqual(edited);
+    expect(regenerated.plan.sheets[0]?.boards).toEqual(job.plan.sheets[0]?.boards);
+    const after = toDxfFiles(regenerated.plan, 'J1');
+    expect(after.get('W18-1-A.side-a.dxf')).toEqual(before.get('W18-1-A.side-a.dxf'));
+    // The O16 Blank holds nothing cut, so it is nested again with the 60 mm margin.
+    expect(after.get('O16-1-A.side-a.dxf')).not.toEqual(before.get('O16-1-A.side-a.dxf'));
+    expect(after.get('O16-1-A.side-a.dxf')).toContain('\n60\n');
+  });
+
+  it('unlocks a Blank once its last Cut is unticked: the next regenerate re-plans it', () => {
+    const model = syntheticModel();
+    const job = generateJob(model, DEFAULT_SETTINGS);
+    const unticked = apply(job, shelfCut, { kind: 'untick', partId: SHELF, step: 'cut' });
+
+    expect(regenerate(job, edited, unticked).plan).toEqual(generateJob(model, edited).plan);
+  });
+
+  it('refuses the Saw / CNC toggle on a Part of a Locked Board, and keeps Locked Boards when toggling others', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    expect(setPartMode(job, 'c1/s0.rail[1]', 'cnc', shelfCut)).toEqual({
+      error: 'This Part is on Locked Board W18-1, so it stays where it is.',
+    });
+
+    const toe = setPartMode(job, 'w1.left.lower.c1/toeKick/0', 'saw', shelfCut);
+    if ('error' in toe) throw new Error(toe.error);
+    expect(toe.job.plan.sheets[0]?.boards).toEqual(job.plan.sheets[0]?.boards);
+    expect(toe.job.plan.sheets[1]?.sawParts).toEqual(['w1.left.lower.c1/toeKick/0']);
+  });
+
+  it('refuses a new Sheet code while the Sheet has Locked Boards, since Locked Blanks keep their ids', () => {
+    const model = syntheticModel();
+    const job = generateJob(model, DEFAULT_SETTINGS);
+    expect(setSheetCode(job, W18(model), 'X1', shelfCut)).toEqual({
+      error: 'W18 has Locked Boards, so its code can no longer change.',
+    });
+    expect('job' in setSheetCode(job, O16(model), 'X1', shelfCut)).toBe(true);
   });
 });

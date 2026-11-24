@@ -16,7 +16,7 @@ export function toDxfFiles(plan: Plan, job: string): Map<string, string> {
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
       for (const blank of board.blanks) {
-        files.set(`${blank.id}.side-a.dxf`, sideA(blank, plan.settings.clampMargin));
+        files.set(`${blank.id}.side-a.dxf`, sideA(blank, blank.clampMargin ?? plan.settings.clampMargin));
       }
     }
   }
@@ -87,7 +87,7 @@ export function layerUsage(plan: Plan, thicknessOf: (partId: string) => number):
   };
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
-      for (const blank of board.blanks) add(sideAEntities(blank, plan.settings.clampMargin), sheet.thickness);
+      for (const blank of board.blanks) add(sideAEntities(blank, blank.clampMargin ?? plan.settings.clampMargin), sheet.thickness);
     }
   }
   for (const file of plan.sideB) add(sideBEntities(file), thicknessOf(file.partIds[0] ?? ''));
