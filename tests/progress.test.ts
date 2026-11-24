@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
-import { generateJob, type Job } from '../src/core/job.ts';
+import { generateJob, remake, type Job } from '../src/core/job.ts';
 import { apply, isDone, reprintSelection, rollup, steps, wouldUnlock, type Progress } from '../src/core/progress.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 
@@ -184,5 +184,40 @@ describe('Reprints after a regenerate', () => {
   it('leave out Locked Boards and Blanks, the Parts on them and Done Parts, in Run order', () => {
     const railCut = apply(job, {}, { kind: 'tick', partId: RAIL, step: 'cut', at: T1 });
     expect(reprintSelection(job, railCut)).toEqual({ boards: ['O16-1'], blanks: ['O16-1-A'], parts: [TOE], sideB: [] });
+  });
+});
+
+describe('A Remake Part greyed on its old Blank', () => {
+  // The shelf and door were cut on W18-1-A, then the shelf marked Remake: greyed there, ticks cleared.
+  const both = apply(job, apply(job, {}, { kind: 'tick', partId: SHELF, step: 'cut', at: T1 }), {
+    kind: 'tick',
+    partId: DOOR,
+    step: 'cut',
+    at: T1,
+  });
+  const marked = remake(job, both, SHELF);
+  if ('error' in marked) throw new Error(marked.error);
+  const remadeJob = marked.job;
+
+  it('counts nowhere on that Blank, which stays Locked; it still counts for its Sheet', () => {
+    const r = rollup(remadeJob, marked.progress);
+    expect(r.blanks[0]).toEqual({ id: 'W18-1-A', cut: 1, done: 0, total: 1, locked: true });
+    expect(r.boards[0]).toMatchObject({ id: 'W18-1', cut: 1, total: 3, locked: true });
+    expect(r.sheets[0]).toMatchObject({ code: 'W18', cut: 1, total: 4 });
+  });
+
+  it('keeps the Blank and Board Locked when the last Cut on them is unticked', () => {
+    expect(wouldUnlock(remadeJob, marked.progress, DOOR, 'cut')).toEqual([]);
+  });
+
+  it('is not ticked by "Side A done" on its old Blank', () => {
+    const p = apply(remadeJob, {}, { kind: 'sideADone', blankId: 'W18-1-A', at: T2 });
+    expect(Object.keys(p)).toEqual([DOOR]);
+  });
+
+  it('is reprinted, while its old Blank is not', () => {
+    const r = reprintSelection(remadeJob, marked.progress);
+    expect(r.blanks).toEqual(['O16-1-A']);
+    expect(r.parts).toContain(SHELF);
   });
 });

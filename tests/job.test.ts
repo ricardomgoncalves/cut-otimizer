@@ -2,7 +2,19 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { toDxfFiles } from '../src/core/dxf/index.ts';
 import { importExport } from '../src/core/import/index.ts';
-import { generateJob, regenerate, setPartMode, setSheetCode, sheetCode, snapshotChanges } from '../src/core/job.ts';
+import {
+  addBoards,
+  generateJob,
+  lockedBoards,
+  regenerate,
+  remake,
+  setOffcutDiscarded,
+  setPartMode,
+  setSheetCode,
+  sheetCode,
+  snapshotChanges,
+  type Job,
+} from '../src/core/job.ts';
 import type { Model } from '../src/core/model.ts';
 import { apply, type Progress } from '../src/core/progress.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
@@ -201,5 +213,82 @@ describe('Locked Boards and Blanks on regenerate', () => {
       error: 'W18 has Locked Boards, so its code can no longer change.',
     });
     expect('job' in setSheetCode(job, O16(model), 'X1', shelfCut)).toBe(true);
+  });
+});
+
+describe('Remake and kept Offcuts', () => {
+  const SHELF = 'c1/s0.shelf[0]';
+  const DOOR = 'c1/s0.door.leaf[0]';
+  const T1 = '2026-11-24T10:00:00.000Z';
+  const bothCut: Progress = { [SHELF]: { cut: T1, banded: T1 }, [DOOR]: { cut: T1 } };
+  const placements = (job: Job, partId: string) =>
+    job.plan.sheets.flatMap((s) =>
+      s.boards.flatMap((b) =>
+        b.blanks.flatMap((x) => x.parts.filter((p) => p.partId === partId).map((p) => ({ blank: x, p }))),
+      ),
+    );
+
+  it("clears the Part's ticks, greys it on its old Blank, which stays Locked, and nests it again at regenerate", () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    const result = remake(job, bothCut, SHELF);
+    if ('error' in result) throw new Error(result.error);
+
+    expect(result.progress).toEqual({ [DOOR]: { cut: T1 } });
+    expect(placements(result.job, SHELF).map(({ blank, p }) => [blank.id, p.remade])).toEqual([['W18-1-A', true]]);
+    expect(lockedBoards(result.job, result.progress).map((b) => b.id)).toEqual(['W18-1']);
+
+    // Without the door's tick the old Blank is still Locked by the Remake.
+    const alone = remake(job, { [SHELF]: { cut: T1 } }, SHELF);
+    if ('error' in alone) throw new Error(alone.error);
+    expect(lockedBoards(alone.job, alone.progress).map((b) => b.id)).toEqual(['W18-1']);
+
+    const next = regenerate(alone.job, DEFAULT_SETTINGS, alone.progress);
+    expect(placements(next, SHELF).map(({ blank, p }) => [blank.id, blank.from, p.remade])).toEqual([
+      ['W18-1-A', undefined, true],
+      // The first kept Offcut the shelf fits with its clamp margins (K1 is too small).
+      ['W18-1-B', 'W18-1-K2', undefined],
+    ]);
+  });
+
+  it('only remakes a Part already cut', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    expect(remake(job, {}, SHELF)).toEqual({ error: 'Only a Part already cut can be remade.' });
+    expect(remake(job, {}, 'nope')).toEqual({ error: 'There is no Part nope in this Job.' });
+  });
+
+  it('discards a kept Offcut and undoes that', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    const discarded = setOffcutDiscarded(job, 'W18-1-K1', true);
+    if ('error' in discarded) throw new Error(discarded.error);
+    const offcut = discarded.job.plan.sheets[0]?.boards[0]?.offcuts.find((o) => o.id === 'W18-1-K1');
+    expect(offcut?.discarded).toBe(true);
+
+    const back = setOffcutDiscarded(discarded.job, 'W18-1-K1', false);
+    if ('error' in back) throw new Error(back.error);
+    expect(back.job.plan).toEqual(job.plan);
+    expect(setOffcutDiscarded(job, 'W18-9-K1', true)).toEqual({
+      error: 'There is no kept Offcut W18-9-K1 in this Job.',
+    });
+  });
+
+  it('lists the Parts that fit nowhere and adds a Board only when asked', () => {
+    const model = syntheticModel();
+    let job = generateJob(model, DEFAULT_SETTINGS);
+    for (const o of job.plan.sheets[0]?.boards[0]?.offcuts ?? []) {
+      if (!o.id) continue;
+      const r = setOffcutDiscarded(job, o.id, true);
+      if ('error' in r) throw new Error(r.error);
+      job = r.job;
+    }
+    const marked = remake(job, { [SHELF]: { cut: T1 } }, SHELF);
+    if ('error' in marked) throw new Error(marked.error);
+
+    const asked = regenerate(marked.job, DEFAULT_SETTINGS, marked.progress);
+    expect(asked.plan.sheets[0]?.overflow).toEqual([SHELF]);
+    expect(asked.plan.sheets[0]?.boards.map((b) => b.number)).toEqual([1]);
+
+    const added = addBoards(asked, [W18(model)], marked.progress);
+    expect(added.plan.sheets[0]?.overflow).toEqual([]);
+    expect(placements(added, SHELF).map(({ blank }) => blank.id)).toEqual(['W18-1-A', 'W18-2-A']);
   });
 });

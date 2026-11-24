@@ -2,7 +2,7 @@
 // those ticks (PRD stories 9.1, 9.2, 9.6 and 9.7). Ticks are keyed by Export Part id and stored in the
 // Job document; roll-ups are always computed, never stored.
 import type { Job } from './job.ts';
-import type { Board, SheetPlan } from './planner/index.ts';
+import { blankLocked, boardLocked, livePartIds, type Blank, type Board, type SheetPlan } from './planner/index.ts';
 
 /** One tracked stage of a Part, in Run order. */
 export type Step = 'cut' | 'sideB' | 'banded' | 'manualOps';
@@ -42,11 +42,11 @@ export function apply(job: JobView, progress: Progress, event: ProgressEvent): P
     }
     case 'sideADone': {
       const blank = boards(job).flatMap((b) => b.board.blanks).find((b) => b.id === event.blankId);
-      return tick(job, progress, blank?.parts.map((p) => p.partId) ?? [], 'cut', event.at);
+      return tick(job, progress, blank ? blankParts(blank) : [], 'cut', event.at);
     }
     case 'breakdownDone': {
       const board = boards(job).find((b) => b.id === event.boardId);
-      return tick(job, progress, board?.board.sawParts.map((p) => p.partId) ?? [], 'cut', event.at);
+      return tick(job, progress, board?.board.sawParts.filter((p) => !p.remade).map((p) => p.partId) ?? [], 'cut', event.at);
     }
     case 'sideBDone': {
       const file = job.plan.sideB.find((f) => f.id === event.fileId);
@@ -70,9 +70,12 @@ function boards(job: JobView): BoardRef[] {
   return job.plan.sheets.flatMap((sheet) => sheet.boards.map((board) => ({ id: boardId(sheet, board), sheet, board })));
 }
 
-/** Every Part cut from a Board: its Blanks' Parts, then its Saw Parts. */
-function boardParts(board: Board): string[] {
-  return [...board.blanks.flatMap((b) => b.parts.map((p) => p.partId)), ...board.sawParts.map((p) => p.partId)];
+/** Every Part cut from a Board now: its Blanks' Parts, then its Saw Parts (Remake Parts greyed there left out). */
+const boardParts = livePartIds;
+
+/** A Blank's Parts, leaving out Remake Parts greyed on it. */
+function blankParts(blank: Blank): string[] {
+  return blank.parts.filter((p) => !p.remade).map((p) => p.partId);
 }
 
 function tick(job: JobView, progress: Progress, partIds: readonly string[], step: Step, at: string): Progress {
@@ -150,19 +153,25 @@ export function rollup(job: JobView, progress: Progress): Rollup {
 
   const blanks: BlankProgress[] = [];
   const boardRows: BoardProgress[] = [];
+  const cutNow = (id: string) => isCut(progress, id);
   for (const { id, sheet, board } of boards(job)) {
     for (const blank of board.blanks) {
-      const ids = blank.parts.map((p) => p.partId);
-      const cut = cutOf(ids);
-      blanks.push({ id: blank.id, cut, done: ids.filter((i) => done.has(i)).length, total: ids.length, locked: cut > 0 });
+      const ids = blankParts(blank);
+      blanks.push({
+        id: blank.id,
+        cut: cutOf(ids),
+        done: ids.filter((i) => done.has(i)).length,
+        total: ids.length,
+        locked: blankLocked(blank, cutNow),
+      });
     }
     const ids = boardParts(board);
-    const cut = cutOf(ids);
-    boardRows.push({ id, sheetId: sheet.sheetId, cut, total: ids.length, locked: cut > 0 });
+    boardRows.push({ id, sheetId: sheet.sheetId, cut: cutOf(ids), total: ids.length, locked: boardLocked(board, cutNow) });
   }
 
   const sheets = job.plan.sheets.map((sheet): SheetProgress => {
-    const ids = [...sheet.boards.flatMap(boardParts), ...sheet.unplaced];
+    // Every Part of the Sheet: on a Board, too big for one, or waiting to be nested (Remake, overflow).
+    const ids = job.model.parts.filter((p) => p.sheetId === sheet.sheetId).map((p) => p.id);
     return { sheetId: sheet.sheetId, code: sheet.code, cut: cutOf(ids), total: ids.length };
   });
 
@@ -194,14 +203,13 @@ export function rollup(job: JobView, progress: Progress): Rollup {
  */
 export function wouldUnlock(job: JobView, progress: Progress, partId: string, step: Step): string[] {
   if (step !== 'cut' || !isCut(progress, partId)) return [];
-  const othersCut = (ids: readonly string[]) => ids.some((id) => id !== partId && isCut(progress, id));
+  const othersCut = (id: string) => id !== partId && isCut(progress, id);
   const out: string[] = [];
   for (const { id, board } of boards(job)) {
-    const ids = boardParts(board);
-    if (!ids.includes(partId)) continue;
-    const blank = board.blanks.find((b) => b.parts.some((p) => p.partId === partId));
-    if (blank && !othersCut(blank.parts.map((p) => p.partId))) out.push(blank.id);
-    if (!othersCut(ids)) out.push(id);
+    if (!boardParts(board).includes(partId)) continue;
+    const blank = board.blanks.find((b) => blankParts(b).includes(partId));
+    if (blank && !blankLocked(blank, othersCut)) out.push(blank.id);
+    if (!boardLocked(board, othersCut)) out.push(id);
   }
   return out;
 }
@@ -227,13 +235,15 @@ export function reprintSelection(job: JobView, progress: Progress): ReprintSelec
   const keep = (ids: readonly string[]) => ids.filter((id) => !isDone(job, progress, id));
   for (const sheet of job.plan.sheets) {
     for (const board of sheet.boards) {
-      const ids = boardParts(board);
-      if (ids.some((id) => isCut(progress, id))) continue;
+      if (boardLocked(board, (id) => isCut(progress, id))) continue;
       out.boards.push(boardId(sheet, board));
       out.blanks.push(...board.blanks.map((b) => b.id));
-      out.parts.push(...keep(ids));
+      out.parts.push(...keep(boardParts(board)));
     }
-    out.parts.push(...keep(sheet.unplaced));
+    // On no Board: too big for one, or waiting for nesting (a Remake not yet re-nested, overflow).
+    const live = new Set(job.plan.sheets.flatMap((s) => s.boards.flatMap(boardParts)));
+    const waiting = job.model.parts.filter((p) => p.sheetId === sheet.sheetId && !live.has(p.id)).map((p) => p.id);
+    out.parts.push(...keep(waiting));
   }
   const parts = new Set(out.parts);
   out.sideB = job.plan.sideB.filter((f) => f.partIds.some((id) => parts.has(id))).map((f) => f.id);

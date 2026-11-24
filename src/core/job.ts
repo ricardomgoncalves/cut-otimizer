@@ -7,7 +7,17 @@
 // re-plan here: `regenerate`, the Saw / CNC toggle and Sheet code edits pass the stored Plan and the Cut
 // Part ids to the Planner, which keeps them exactly as they are.
 import type { Model } from './model.ts';
-import { partRule, plan, type Board, type PartMode, type Plan } from './planner/index.ts';
+import {
+  boardLocked,
+  discardOffcut,
+  livePartIds,
+  partRule,
+  plan,
+  remakePart,
+  type Board,
+  type PartMode,
+  type Plan,
+} from './planner/index.ts';
 import { boardId, type Progress } from './progress.ts';
 import { settingsChanges, type Settings } from './settings.ts';
 
@@ -40,6 +50,7 @@ function planJob(
   sawCnc: Record<string, PartMode>,
   prior: Plan | null,
   progress: Progress,
+  addBoards: readonly string[] = [],
 ): Job {
   const snapshot: Settings = {
     ...settings,
@@ -52,7 +63,11 @@ function planJob(
     settings: snapshot,
     sheetCodes,
     sawCnc,
-    plan: plan(withSheetCodes(model, sheetCodes), snapshot, prior ? { sawCnc, plan: prior, cut } : { sawCnc }),
+    plan: plan(
+      withSheetCodes(model, sheetCodes),
+      snapshot,
+      prior ? { sawCnc, plan: prior, cut, addBoards } : { sawCnc },
+    ),
   };
 }
 
@@ -65,14 +80,47 @@ export function regenerate(job: Job, settings: Settings, progress: Progress = {}
   return planJob(job.model, settings, job.sheetCodes, job.sawCnc, job.plan, progress);
 }
 
-/** The Locked Boards of the Job's Plan (any Part on them ticked Cut), with their ids (`W18-1`). */
+/**
+ * Agrees to more Boards for these Sheets: re-plans with the Job's own snapshot, so the Parts that needed
+ * nesting but fit no kept Offcut or unlocked Board (`SheetPlan.overflow`) get new Boards.
+ */
+export function addBoards(job: Job, sheetIds: readonly string[], progress: Progress = {}): Job {
+  return planJob(job.model, job.settings, job.sheetCodes, job.sawCnc, job.plan, progress, sheetIds);
+}
+
+/**
+ * The Locked Boards of the Job's Plan (a Part on them ticked Cut, or a Remake Part greyed on them), with
+ * their ids (`W18-1`).
+ */
 export function lockedBoards(job: Pick<Job, 'plan'>, progress: Progress): { id: string; sheetId: string; board: Board }[] {
   const isCut = (id: string) => progress[id]?.cut !== undefined;
   return job.plan.sheets.flatMap((sheet) =>
     sheet.boards
-      .filter((b) => [...b.blanks.flatMap((x) => x.parts), ...b.sawParts].some((p) => isCut(p.partId)))
+      .filter((b) => boardLocked(b, isCut))
       .map((board) => ({ id: boardId(sheet, board), sheetId: sheet.sheetId, board })),
   );
+}
+
+/**
+ * Marks a ruined Part **Remake**: its ticks are cleared, it stays greyed out on its old Blank (which stays
+ * Locked) and it needs nesting at the next regenerate. Only a Part ticked Cut can be remade.
+ */
+export function remake(job: Job, progress: Progress, partId: string): { job: Job; progress: Progress } | { error: string } {
+  if (!job.model.parts.some((p) => p.id === partId)) return { error: `There is no Part ${partId} in this Job.` };
+  const onBoard = job.plan.sheets.some((s) => s.boards.some((b) => livePartIds(b).includes(partId)));
+  if (progress[partId]?.cut === undefined || !onBoard) return { error: 'Only a Part already cut can be remade.' };
+  return {
+    job: { ...job, plan: remakePart(job.plan, partId) },
+    progress: Object.fromEntries(Object.entries(progress).filter(([id]) => id !== partId)),
+  };
+}
+
+/** Discards a kept Offcut (it is no longer stock for Parts that need nesting), or undoes that. */
+export function setOffcutDiscarded(job: Job, offcutId: string, discarded: boolean): { job: Job } | { error: string } {
+  const next = discardOffcut(job.plan, offcutId, discarded);
+  const known = job.plan.sheets.some((s) => s.boards.some((b) => b.offcuts.some((o) => o.id === offcutId && o.kept && !o.used)));
+  if (!known) return { error: `There is no kept Offcut ${offcutId} in this Job.` };
+  return { job: { ...job, plan: next } };
 }
 
 /**
@@ -89,9 +137,7 @@ export function setPartMode(
   const rule = partRule(job.model, job.settings, partId);
   if (!rule) return { error: `There is no Part ${partId} in this Job.` };
   if (rule.oversize) return { error: 'This Part is bigger than the usable bed, so it is always cut on the saw.' };
-  const locked = lockedBoards(job, progress).find(({ board }) =>
-    [...board.blanks.flatMap((b) => b.parts), ...board.sawParts].some((p) => p.partId === partId),
-  );
+  const locked = lockedBoards(job, progress).find(({ board }) => livePartIds(board).includes(partId));
   if (locked) return { error: `This Part is on Locked Board ${locked.id}, so it stays where it is.` };
   const sawCnc = Object.fromEntries(Object.entries(job.sawCnc).filter(([id]) => id !== partId));
   if (mode !== rule.auto) sawCnc[partId] = mode;
