@@ -20,14 +20,15 @@ const DRAWING_TOP = 18;
 const ROW = 4.8;
 
 export function sideBPages(plan: Plan, job: CutSheetJob): Page[] {
-  if (plan.sideB.length === 0) return [];
+  const files = plan.sideB.filter((f) => !job.only || job.only.sideB.includes(f.id));
+  if (files.length === 0) return [];
   const title = `${sectionNumber(plan, job.model, 'sideB')} · CNC Side B batch`;
   const sub = 'After every Side A run, before edge banding. Zero the machine on the Fence corner once.';
   const flow = new Flow((page, continued) => workHeader(page, job, continued ? `${title} (continued)` : title, sub));
   const where = partLocations(plan);
 
-  for (let i = 0; i < plan.sideB.length; i += 2) {
-    const row = plan.sideB.slice(i, i + 2);
+  for (let i = 0; i < files.length; i += 2) {
+    const row = files.slice(i, i + 2);
     const height = Math.max(...row.map(cardHeight));
     flow.ensure(height + 3);
     flow.y += 3;

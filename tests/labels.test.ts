@@ -100,6 +100,16 @@ describe('stickerSpot: where the label goes on the bottom face', () => {
 const job: LabelsJob = { name: 'Kitchen run', shortId: '7F3A', model: handModel };
 const qrs = (page: Page | undefined) => (page?.items ?? []).filter((it): it is QrItem => it.kind === 'qr');
 
+describe('labels to reprint after a regenerate', () => {
+  it('prints only the selected Parts, in label order, under its own title', () => {
+    const pages = labels(handPlan, job, { partIds: ['g1/toeKick', 'c1/shelf'], title: 'Labels to reprint' });
+    expect(qrs(pages[0]).map((q) => decodeModules(q.modules))).toEqual(
+      ['c1/shelf', 'g1/toeKick'].map((id) => scanPayload('7F3A', id)),
+    );
+    expect(texts(pages[0])).toContain('Labels to reprint · Kitchen run · Job 7F3A · sheet 1 of 1');
+  });
+});
+
 describe('labels: L7163 sheets, one label per Part in Run order', () => {
   const pages = labels(handPlan, job);
   const page = pages[0];

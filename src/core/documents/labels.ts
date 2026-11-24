@@ -28,11 +28,16 @@ export interface LabelsJob {
   name: string;
   shortId: string;
   model: Model;
-  /**
-   * Only these Parts: "Print labels for this re-import" (the log entry's `labelIds`). In label order, then
-   * those not on a Board yet (reimportLabelOrder). Every Part of the Plan when left out.
-   */
-  partIds?: readonly string[];
+}
+
+/**
+ * Only some Parts, under a title of their own: "Labels for re-import" (the log entry's `labelIds`) or
+ * "Labels to reprint" (progress.ts `reprintSelection(...).parts`). In label order, then those not on a
+ * Board yet (reimportLabelOrder).
+ */
+export interface LabelSelection {
+  partIds: readonly string[];
+  title: string;
 }
 
 /** Sticker spot rules, µm: how far from the Part's edges, and how much clearance around every op. */
@@ -214,11 +219,14 @@ export function reimportLabelOrder(plan: Plan, partIds: readonly string[]): Labe
   return [...placed, ...partIds.filter((id) => !listed.has(id)).map((partId) => ({ partId, where: 'needs nesting' }))];
 }
 
-/** The label sheets: 14 labels a sheet in label order (labelOrder), filling each row left to right. */
-export function labels(plan: Plan, job: LabelsJob): Page[] {
-  const order = job.partIds ? reimportLabelOrder(plan, job.partIds) : labelOrder(plan);
+/**
+ * The label sheets: 14 labels a sheet in label order (labelOrder), filling each row left to right. Every
+ * Part of the Plan, or only the `selection`.
+ */
+export function labels(plan: Plan, job: LabelsJob, selection?: LabelSelection): Page[] {
+  const order = selection ? reimportLabelOrder(plan, selection.partIds) : labelOrder(plan);
   const entries = order.filter((e) => job.model.parts.some((p) => p.id === e.partId));
-  const title = job.partIds ? 'Labels for re-import' : 'Labels';
+  const title = selection?.title ?? 'Labels';
   const perSheet = SHEET.columns * SHEET.rows;
   const count = Math.max(1, Math.ceil(entries.length / perSheet));
   const pages: Page[] = [];

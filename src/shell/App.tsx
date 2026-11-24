@@ -39,6 +39,7 @@ import {
   apply,
   boardId,
   isDone,
+  reprintSelection,
   rollup,
   steps,
   STEPS,
@@ -480,6 +481,8 @@ export function App() {
   const overflowIds = new Set(job?.plan.sheets.flatMap((s) => s.overflow ?? []) ?? []);
   const waiting = job ? needsNesting(job).filter((id) => !overflowIds.has(id)) : [];
   const rolled = job ? rollup(job, progress) : null;
+  // Once anything is ticked, the PDF and labels can be limited to what isn't Locked or Done.
+  const reprint = job && Object.keys(progress).length > 0 ? reprintSelection(job, progress) : null;
   const blankRoll = new Map(rolled?.blanks.map((b) => [b.id, b]) ?? []);
 
   const header = (
@@ -841,11 +844,13 @@ export function App() {
               spares: open?.doc.spares ?? [],
               reimportLog: open?.doc.reimportLog ?? [],
             }}
+            reprint={reprint}
           />
           <LabelsPanel
             plan={job.plan}
             job={{ name: open?.doc.name ?? job.model.projectName, shortId: open?.doc.shortId ?? '', model: job.model }}
             reimportBatch={open?.doc.reimportLog.at(-1)?.labelIds ?? []}
+            reprint={reprint?.parts ?? null}
           />
           {rolled && <ProgressPanel rollup={rolled} owners={job.model.owners} />}
           <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />

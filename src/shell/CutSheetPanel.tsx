@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react';
 import { cutSheet, pageToSvg, type CutSheetJob } from '../core/documents/index.ts';
 import type { Plan } from '../core/planner/index.ts';
+import type { ReprintSelection } from '../core/progress.ts';
 import { downloadBytes, safeFileName } from './download.ts';
 
 interface Props {
   plan: Plan;
   job: Omit<CutSheetJob, 'generatedAt'>;
+  /** After ticking: what isn't Locked or Done (progress.ts `reprintSelection`), else null. */
+  reprint: ReprintSelection | null;
 }
 
 /** Local time as `YYYY-MM-DD HH:MM`. */
@@ -18,7 +21,7 @@ function localTime(d: Date): string {
  * The cut sheet: "Cut sheet" shows the pages as SVG (the same page model the PDF is drawn from);
  * "Download PDF" renders them with pdf-lib, loaded on demand.
  */
-export function CutSheetPanel({ plan, job }: Props) {
+export function CutSheetPanel({ plan, job, reprint }: Props) {
   const [shown, setShown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewAt, setPreviewAt] = useState(() => localTime(new Date()));
@@ -27,13 +30,14 @@ export function CutSheetPanel({ plan, job }: Props) {
     [shown, plan, job, previewAt],
   );
 
-  async function onDownload() {
+  async function onDownload(only: ReprintSelection | null) {
     setError(null);
     try {
       const { pagesToPdf } = await import('./pdf.ts');
-      const title = `Cut sheet · ${job.name}`;
-      const bytes = await pagesToPdf(cutSheet(plan, { ...job, generatedAt: localTime(new Date()) }), { title });
-      downloadBytes(bytes, `${safeFileName(job.name)}.cut-sheet.pdf`, 'application/pdf');
+      const title = `${only ? 'Cut sheet reprint' : 'Cut sheet'} · ${job.name}`;
+      const pages = cutSheet(plan, { ...job, generatedAt: localTime(new Date()) }, only ?? undefined);
+      const bytes = await pagesToPdf(pages, { title });
+      downloadBytes(bytes, `${safeFileName(job.name)}.${only ? 'reprint' : 'cut-sheet'}.pdf`, 'application/pdf');
     } catch (e) {
       setError(`The PDF could not be made: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -52,9 +56,17 @@ export function CutSheetPanel({ plan, job }: Props) {
         >
           Cut sheet
         </button>{' '}
-        <button type="button" onClick={() => void onDownload()}>
+        <button type="button" onClick={() => void onDownload(null)}>
           Download PDF
         </button>
+        {reprint && (
+          <>
+            {' '}
+            <button type="button" onClick={() => void onDownload(reprint)}>
+              Download reprint PDF: not Locked or Done
+            </button>
+          </>
+        )}
       </p>
       {error && (
         <p role="alert" className="error">

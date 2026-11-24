@@ -76,7 +76,11 @@ describe('cut sheet cover after re-imports', () => {
 describe('the label batch for a re-import', () => {
   const added = { ...handModel.parts[3], id: 'c1/shelf2', displayName: 'B1 · Shelf 2' } as (typeof handModel.parts)[number];
   const model = { ...handModel, parts: [...handModel.parts, added] };
-  const pages = labels(handPlan, { name: 'Kitchen run', shortId: '7F3A', model, partIds: ['c1/shelf2', 'g1/toeKick', 'c1/door'] });
+  const pages = labels(
+    handPlan,
+    { name: 'Kitchen run', shortId: '7F3A', model },
+    { partIds: ['c1/shelf2', 'g1/toeKick', 'c1/door'], title: 'Labels for re-import' },
+  );
 
   it('prints only those Parts, in label order, with Parts not nested yet last', () => {
     expect(pages).toHaveLength(1);

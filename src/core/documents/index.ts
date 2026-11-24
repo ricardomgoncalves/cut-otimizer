@@ -5,5 +5,5 @@ export { sawCuts, type SawCutRow } from './saw.ts';
 export { partLocations, partRunOrder } from './work.ts';
 export { A4, BLACK, hatchLines, qrSquares, type BoxItem, type HatchItem, type Item, type LineItem, type Page, type PolygonItem, type QrItem, type TextItem } from './page.ts';
 export { pageToSvg } from './svg.ts';
-export { LABEL, LABEL_QR, labelOrder, labels, reimportLabelOrder, sizeLadder, stickerSpot, type LabelEntry, type LabelsJob, type StickerSpot } from './labels.ts';
+export { LABEL, LABEL_QR, labelOrder, labels, reimportLabelOrder, sizeLadder, stickerSpot, type LabelEntry, type LabelSelection, type LabelsJob, type StickerSpot } from './labels.ts';
 export { qrCode, type QrEcc } from './qr.ts';

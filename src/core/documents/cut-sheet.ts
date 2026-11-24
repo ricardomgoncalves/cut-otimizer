@@ -4,6 +4,7 @@
 import { layerUsage, referenceLayers, type LayerUse } from '../dxf/index.ts';
 import type { Model, PartEdge } from '../model.ts';
 import type { Board, Plan, SheetPlan } from '../planner/index.ts';
+import { boardId, type ReprintSelection } from '../progress.ts';
 import { CATEGORIES, type Category } from '../reimport.ts';
 import { edgeTrimFor } from '../settings.ts';
 import { mmText, sizeText } from './format.ts';
@@ -36,8 +37,10 @@ export type { CutSheetJob } from './work.ts';
 /**
  * The cut sheet's pages: the cover, one saw page per Board, one Side A page per Blank (Run order), the
  * Side B batch, Edge banding per Edgeband and the Owner summary. Longer tables carry on onto extra pages.
+ * With `only` (progress.ts `reprintSelection`), a reprint after a regenerate: just what isn't Locked or Done.
  */
-export function cutSheet(plan: Plan, job: CutSheetJob): Page[] {
+export function cutSheet(plan: Plan, cutJob: CutSheetJob, only?: ReprintSelection): Page[] {
+  const job: CutSheetJob = only ? { ...cutJob, only } : cutJob;
   const saw = sawPages(plan, job);
   let cover = coverPages(plan, job, 2, saw.length);
   if (cover.length !== 1) cover = coverPages(plan, job, cover.length + 1, saw.length);
@@ -100,7 +103,12 @@ function coverPages(plan: Plan, job: CutSheetJob, sawFrom: number, sawCount: num
 
   // Order of work.
   const banded = job.model.parts.some((p) => Object.keys(p.edges).length > 0);
-  const sawPagesText = sawCount === 1 ? `page ${String(sawFrom)}` : `pages ${String(sawFrom)}–${String(sawFrom + sawCount - 1)}`;
+  const sawPagesText =
+    sawCount === 0
+      ? 'no page to reprint'
+      : sawCount === 1
+        ? `page ${String(sawFrom)}`
+        : `pages ${String(sawFrom)}–${String(sawFrom + sawCount - 1)}`;
   const steps = [
     `Saw: break each Board into Blanks and Saw Parts (${sawPagesText})`,
     `CNC Side A: one file per Blank (${plural(blanks.length, 'file')})`,
@@ -109,6 +117,10 @@ function coverPages(plan: Plan, job: CutSheetJob, sawFrom: number, sawCount: num
     ...(plan.manualOps.length > 0 ? ['Manual ops, by hand'] : []),
     'Check every Part off and assemble',
   ];
+  if (job.only) {
+    flow.y += 5;
+    flow.add(text(MARGIN, flow.y, 'Reprint: only the Boards, Blanks and Parts that are not Locked or Done.', FONT.body, { bold: true }));
+  }
   flow.heading('Order of work');
   steps.forEach((s, i) => {
     flow.paragraph(`${String(i + 1)}. ${s}`);
@@ -360,7 +372,10 @@ const DRAWING_MAX_HEIGHT = 112;
 function sawPages(plan: Plan, job: CutSheetJob): Page[] {
   const pages: Page[] = [];
   for (const sheet of plan.sheets) {
-    for (const board of sheet.boards) pages.push(...sawBoardPages(plan, job, sheet, board));
+    for (const board of sheet.boards) {
+      if (job.only && !job.only.boards.includes(boardId(sheet, board))) continue;
+      pages.push(...sawBoardPages(plan, job, sheet, board));
+    }
   }
   return pages;
 }

@@ -15,6 +15,7 @@ import {
   sideBCell,
   stepCells,
   stepColumns,
+  printsPart,
   workHeader,
   type CutSheetJob,
 } from './work.ts';
@@ -31,7 +32,7 @@ export function ownerPages(plan: Plan, job: CutSheetJob): Page[] {
   ].flatMap((owner) => {
     // Parts in Run order; a Part on no Board or Blank (not planned) goes last, in export order.
     const parts = model.parts
-      .filter((p) => p.ownerId === owner.id)
+      .filter((p) => p.ownerId === owner.id && printsPart(job, p.id))
       .sort((a, b) => (run.get(a.id) ?? Infinity) - (run.get(b.id) ?? Infinity));
     return parts.length === 0 ? [] : [{ owner, parts }];
   });

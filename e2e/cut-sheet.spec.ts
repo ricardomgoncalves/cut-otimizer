@@ -44,3 +44,23 @@ test('Download PDF saves a PDF named after the Job', async ({ page }) => {
   const bytes = await readFile(await download.path());
   expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
 });
+
+test('once a Part is cut, the PDF and labels can be reprinted for what is not Locked or Done', async ({ page }) => {
+  await expect(page.getByRole('button', { name: /Download reprint PDF/ })).toHaveCount(0);
+  await page.getByLabel('Cut: T1 · Shelf').check();
+
+  const [pdf] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('region', { name: 'Cut sheet' }).getByRole('button', { name: /Download reprint PDF/ }).click(),
+  ]);
+  expect(pdf.suggestedFilename()).toMatch(/\.reprint\.pdf$/);
+  expect((await readFile(await pdf.path())).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+
+  // W18-1-A is Locked, and so are the Saw Parts of its Board: only the toe kick on O16 is left.
+  const labels = page.getByRole('region', { name: 'Part labels' });
+  const [sheet] = await Promise.all([
+    page.waitForEvent('download'),
+    labels.getByRole('button', { name: 'Labels to reprint (1): not Locked or Done' }).click(),
+  ]);
+  expect(sheet.suggestedFilename()).toMatch(/\.reprint-labels\.pdf$/);
+});

@@ -33,7 +33,11 @@ const SMALL_DRAWING = 0.7;
 export function sideAPages(plan: Plan, job: CutSheetJob): Page[] {
   const number = sectionNumber(plan, job.model, 'sideA');
   return plan.sheets.flatMap((sheet) =>
-    sheet.boards.flatMap((board) => board.blanks.flatMap((blank) => blankPages(plan, job, sheet, blank, number))),
+    sheet.boards.flatMap((board) =>
+      board.blanks
+        .filter((blank) => !job.only || job.only.blanks.includes(blank.id))
+        .flatMap((blank) => blankPages(plan, job, sheet, blank, number)),
+    ),
   );
 }
 

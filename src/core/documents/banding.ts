@@ -14,6 +14,7 @@ import {
   sectionNumber,
   stepCells,
   stepColumns,
+  printsPart,
   workHeader,
   type CutSheetJob,
 } from './work.ts';
@@ -26,7 +27,7 @@ export function bandingPages(plan: Plan, job: CutSheetJob): Page[] {
   const where = partLocations(plan);
   const order = partRunOrder(plan).flatMap((id) => {
     const part = parts.get(id);
-    return part ? [part] : [];
+    return part && printsPart(job, id) ? [part] : [];
   });
   const bands = [...new Set(order.flatMap((p) => bandedEdges(p).map((b) => b.band)))];
   if (bands.length === 0) return [];

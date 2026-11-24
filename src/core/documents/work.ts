@@ -3,7 +3,7 @@
 import type { ReimportLogEntry, Spare } from '../job-store/document.ts';
 import type { Model, Part, PartEdge } from '../model.ts';
 import { isLive, livePartIds, type Blank, type Placement, type Plan, type SawPlacement, type SheetPlan } from '../planner/index.ts';
-import { steps, type Step } from '../progress.ts';
+import { steps, type ReprintSelection, type Step } from '../progress.ts';
 import { sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, GREY, MARGIN, text, type Cell, type Column } from './layout.ts';
 import { A4, type Page } from './page.ts';
@@ -22,6 +22,17 @@ export interface CutSheetJob {
   spares?: readonly Spare[];
   /** One entry per applied re-import, oldest first (cover only). */
   reimportLog?: readonly ReimportLogEntry[];
+  /**
+   * A reprint after a regenerate (progress.ts `reprintSelection`): only these Boards' saw pages, these
+   * Blanks' Side A pages, these Side B files, and these Parts' banding and Owner rows. Set through
+   * `cutSheet`'s third argument.
+   */
+  only?: ReprintSelection;
+}
+
+/** Whether the Part is printed: every Part, or only the reprinted ones. */
+export function printsPart(job: CutSheetJob, partId: string): boolean {
+  return !job.only || job.only.parts.includes(partId);
 }
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;

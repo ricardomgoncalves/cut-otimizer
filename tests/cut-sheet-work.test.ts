@@ -168,6 +168,39 @@ describe('cut sheet: Owner summary', () => {
   });
 });
 
+describe('cut sheet: reprint after a regenerate', () => {
+  // W18-1 is Locked through W18-1-A (left side and door cut); W18-1-B and O16 are not. The back (a Saw Part of
+  // the Locked Board) and the left side are left out; the shelf and toe kick are not Done.
+  const pages = cutSheet(handPlan, job, {
+    boards: ['O16-1'],
+    blanks: ['W18-1-B', 'O16-1-A'],
+    parts: ['c1/shelf', 'g1/toeKick'],
+    sideB: [],
+  });
+
+  it('leaves out the saw pages of Locked Boards and the Side A pages of Locked Blanks', () => {
+    expect(titled(pages, '1 · Saw').map((p) => texts(p)[0])).toEqual(['1 · Saw · O16 · Board 1 of 1']);
+    expect(titled(pages, '2 · CNC Side A').map((p) => texts(p)[0])).toEqual([
+      '2 · CNC Side A · W18-1-B',
+      '2 · CNC Side A · O16-1-A',
+    ]);
+  });
+
+  it('leaves out Side B files, Edge banding rows and Owner rows of Parts that are not reprinted', () => {
+    expect(titled(pages, '3 · CNC Side B')).toEqual([]);
+    const banding = titled(pages, '4 · Edge banding').flatMap(texts);
+    expect(banding).toContain('Toe Kick B1');
+    expect(banding).not.toContain('B1 · Door');
+    const owners = titled(pages, '6 · Owner summary').flatMap(texts);
+    expect(owners).toEqual(expect.arrayContaining(['B1 · Base 1 door · 1 Part', 'Toe Kick B1 · 1 Part']));
+    expect(owners).not.toContain('B1 · Door');
+  });
+
+  it('says on the cover that it is a reprint', () => {
+    expect(texts(pages[0])).toContain('Reprint: only the Boards, Blanks and Parts that are not Locked or Done.');
+  });
+});
+
 function plannedFixture(): { plan: Plan; job: CutSheetJob } {
   const json: unknown = JSON.parse(readFileSync(new URL('../fixtures/synthetic.parts.json', import.meta.url), 'utf8'));
   const { model } = importExport(json);
