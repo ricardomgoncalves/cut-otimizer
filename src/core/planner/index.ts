@@ -463,29 +463,31 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
     }),
   }));
 
-  // 1. Kept, non-discarded Offcuts of Locked Boards, for the CNC Parts that need nesting.
+  // 1. Kept, non-discarded Offcuts of Locked Boards, for the Parts that need nesting (CNC and Saw Parts).
   const boards = relaid.map((board) => {
     let out = board;
     let waiting = nestingOrder(cnc.filter((p) => needs.has(p.id) && !placedEarly.has(p.id)));
-    for (let i = 0; i < out.offcuts.length && waiting.length > 0; i++) {
+    let waitingSaw = sawOrder(saw.filter((s) => needs.has(s.part.id) && !placedEarly.has(s.part.id)));
+    for (let i = 0; i < out.offcuts.length && waiting.length + waitingSaw.length > 0; i++) {
       const offcut = out.offcuts[i];
       if (!offcut?.id || !offcut.kept || offcut.used || offcut.discarded) continue;
       const offCtx: Ctx = {
         ...ctx,
         area: { x0: offcut.x, y0: offcut.y, x1: offcut.x + offcut.length, y1: offcut.y + offcut.width },
       };
-      const draft = bestBoard(offCtx, waiting, []);
+      const draft = bestBoard(offCtx, waiting, waitingSaw);
       if (!draft) continue;
       out = cutOffcut(offCtx, out, offcut.id, draft);
       for (const id of draftPartIds(draft)) placedEarly.add(id);
       waiting = waiting.filter((p) => !placedEarly.has(p.id));
+      waitingSaw = waitingSaw.filter((s) => !placedEarly.has(s.part.id));
     }
     return out;
   });
 
   // 2. The Breakdown of the Sheet's unlocked Boards, with every other Part not on a Locked Board.
   const cncLeft = cnc.filter((p) => !placedEarly.has(p.id));
-  const sawLeft = saw.filter((s) => fitsBoard(s.part));
+  const sawLeft = saw.filter((s) => fitsBoard(s.part) && !placedEarly.has(s.part.id));
   const all = draftBoards(ctx, cncLeft, sawLeft);
   let chosen = all;
   let overflow: string[] = [];

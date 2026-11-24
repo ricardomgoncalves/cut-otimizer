@@ -666,6 +666,23 @@ describe('Remake, kept Offcuts and the needs-nesting order', () => {
     expect(after.sheets[0]?.overflow).toEqual([]);
   });
 
+  it('cuts a Remake Saw Part from a kept Offcut of the Locked Board too', () => {
+    const { model } = twoParts();
+    const sawCnc = { p1: 'saw' as const };
+    const before = plan(model, DEFAULT_SETTINGS, { sawCnc });
+    expect(board1(before)?.sawParts.map((p) => p.partId)).toEqual(['p1']);
+
+    const after = plan(model, DEFAULT_SETTINGS, { plan: remakePart(before, 'p1'), cut: ['p0'], sawCnc });
+    const board = board1(after);
+    const again = board?.sawParts.find((p) => p.partId === 'p1' && !p.remade);
+    const from = board?.offcuts.find((o) => o.used);
+    if (!again || !from) throw new Error('the Remake Saw Part must be cut from a kept Offcut');
+    expect(inside(again, from)).toBe(true);
+    expect(board?.cuts.slice(board1(before)?.cuts.length).every((c) => c.from === from.id)).toBe(true);
+    expect(after.sheets[0]?.boards.map((b) => b.number)).toEqual([1]);
+    expect(after.sheets[0]?.overflow).toEqual([]);
+  });
+
   it('ignores discarded Offcuts, and Discard can be undone', () => {
     const { model, before } = twoParts();
     const after = plan(model, DEFAULT_SETTINGS, {
