@@ -43,9 +43,21 @@ _Avoid_: sub-sheet, tile, offcut
 The arrangement of Parts on one Blank.
 _Avoid_: nest, sheet layout
 
-**Side**:
-One face of a Blank as set up on the bed. **Side A** has the `top` face up. **Side B** is flipped, for `bottom`-face ops.
-_Avoid_: face (that is a Part's op face), setup
+**Side A**:
+A Blank set up on the bed with the `top` face up. It runs the Layout's `top` ops and the Part outlines.
+_Avoid_: face (that is a Part's op face), setup, front
+
+**Side B**:
+One Flip Part set up on its own, bottom face up, against the Fence corner, to run its CNC `bottom`-face ops. It is done after Side A and before edge banding.
+_Avoid_: flipped Blank, back
+
+**Flip Part**:
+A Part that still has at least one blind `bottom`-face op to run on the CNC. Through holes and ops sent to manual work don't count.
+_Avoid_: two-sided part
+
+**Fence corner**:
+The square stop fixed to the bed that a Flip Part is pushed into for Side B. It is the origin of a Side B file.
+_Avoid_: jig, registration
 
 **Machine settings**:
 Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter and kerf. A Job keeps a snapshot of them from when its Layouts were generated.
