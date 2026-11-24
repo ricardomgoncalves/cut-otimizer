@@ -4,6 +4,41 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cut Optimizer</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --text: #1a1a1a;
+        --ref: #8a8a8a;
+        --part: #1f5f99;
+        --part-bg: #dbe9f6;
+        --blank-bg: #f6f3ec;
+        --error: #b00020;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #141414;
+          --text: #eee;
+          --ref: #888;
+          --part: #8cc0ef;
+          --part-bg: #1d3347;
+          --blank-bg: #2a2722;
+          --error: #ff6b81;
+        }
+      }
+      body {
+        margin: 0 16px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, sans-serif;
+      }
+      .error {
+        color: var(--error);
+      }
+      figure {
+        margin: 1rem 0;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
