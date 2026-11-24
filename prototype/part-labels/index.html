@@ -1,0 +1,226 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Answers "Prototype: part labels on A4 sticker sheets" (cut-otimizer#12).
+  Three structurally different label sheets, switchable via ?variant=A|B|C (← → keys or the yellow bar):
+    A  Compact 3×8   (70 × 37 mm, 24 a sheet, borderless): QR first, text, tiny edge glyph
+    B  Drawing 2×7   (99.1 × 38.1 mm, 14 a sheet, Avery L7163 layout): the Part outline is the label
+    C  Traveller 2×4 (99.1 × 67.7 mm, 8 a sheet, Avery L7165 layout): label carries its own Step ticks
+  Every variant ends with the same SIZE LADDER page: print it, then scan each QR with the shop laptop's
+  webcam and the keyboard-wedge scanner, and read the text sizes at arm's length.
+  Labels are in work order: Blanks in id order, Parts by number within the Blank, then Saw Parts.
+  Data: the same SYNTHETIC Job as the cut-sheet prototype (data.js). The real export has no Manual ops,
+  so two are invented below (marked DEMO) to show the warning.
+  Print with Ctrl+P (A4, margins: none, scale 100%) or run `node prototype/part-labels/render.mjs`.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part labels prototype</title>
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#888; font: 8pt/1.15 "Helvetica Neue", Arial, sans-serif; color:#000; }
+  .sheet { width:210mm; height:297mm; background:#fff; margin:12px auto; position:relative; overflow:hidden; break-after:page; page-break-after:always; }
+  .sheet:last-child { break-after:auto; page-break-after:auto; }
+  @media print { body{background:#fff} .sheet{margin:0} #switcher{display:none !important} .cutline{outline:none !important} }
+  .lbl { position:absolute; overflow:hidden; }
+  .cutline { outline:0.2mm dashed #bbb; outline-offset:-0.1mm; } /* screen only: where the die cut is */
+  .mono { font-family: Menlo, Consolas, monospace; }
+  .warn { display:inline-block; background:#000; color:#fff; font-weight:700; padding:0.2mm 1mm; border-radius:0.6mm; margin-right:0.8mm; white-space:nowrap; }
+  .box { display:inline-block; width:3.4mm; height:3.4mm; border:0.3mm solid #000; vertical-align:middle; }
+  svg { display:block; }
+  #switcher { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#ff0; color:#000; border:2px solid #000;
+    border-radius:999px; padding:6px 10px; display:flex; gap:10px; align-items:center; font:600 13px system-ui; box-shadow:0 4px 14px rgba(0,0,0,.4); z-index:9; }
+  #switcher button { border:0; background:#000; color:#ff0; border-radius:999px; width:28px; height:28px; font-size:16px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="doc"></div>
+<div id="switcher"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+<script src="qrcode.js"></script>
+<script src="data.js"></script>
+<script>
+// ============================================================ EXTRA SYNTHETIC FACTS (labels need them)
+const CABNAME = { B1:'Base 600 · left of sink', B2:'Sink base 600', B3:'Base 600 · drawers later', B4:'Base 600 · corner' };
+// DEMO: the real export has no edge ops. Two invented Manual ops so the warning has something to show.
+parts.find(p=>p.cab==='B4'&&p.name==='s0.shelf[0]').manual.push('x0: 2× Ø8 dowel, 30 deep', 'xL: 2× Ø8 dowel, 30 deep');
+parts.find(p=>p.item==='End Panel B2 end').manual.push('yW: Ø5 × 12 for plinth clip');
+
+const ordered = blanks.flatMap(bl => bl.items.map(it => it.p)).concat(boards.flatMap(b => b.saws));
+const grainOn = p => p.grain==='length' || SHEETS[p.sheet].grain==='length';
+const banded = p => Object.entries(p.band).filter(([,v])=>v);
+const bandNames = p => [...new Set(banded(p).map(([,v])=>v))];
+const mm = n => Number.isInteger(n)?n:n.toFixed(1);
+const human = p => p.cab ? (HUMAN[p.name]||p.name) : p.item.replace(/ B\d.*$/,'') + (p.item.match(/(start|end)$/)?' · '+p.item.match(/(start|end)$/)[1]:'');
+const cabOf = p => p.cab || p.group;
+const cabLine = p => p.cab ? CABNAME[p.cab] : p.item;           // generated items keep their item label
+const qrText = p => `${S.jobShort}:${p.id}`;                       // plain text, per the progress-tracking decision
+const thick = p => SHEETS[p.sheet].t;
+
+// ---------- QR as an SVG sized in mm. quiet = modules of white border.
+function qr(text, sizeMm, { ecc='M', quiet=2 }={}) {
+  const q = qrcode(0, ecc); q.addData(text); q.make();
+  const n = q.getModuleCount(), N = n + 2*quiet; let d = '';
+  for (let r=0;r<n;r++) for (let c=0;c<n;c++) if (q.isDark(r,c)) d += `M${c+quiet} ${r+quiet}h1v1h-1z`;
+  return { svg:`<svg width="${sizeMm}mm" height="${sizeMm}mm" viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges"><rect width="${N}" height="${N}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`, modules:n, moduleMm: sizeMm/N };
+}
+
+// ---------- Part outline in the Part's own frame: x0 left, xL right, y0 bottom (front), yW top. Banded edges heavy.
+function outline(p, wMm, hMm, { names=false, ops=false, grain=true, font=1.9 }={}) {
+  const pad = names ? 3.2 : 0.8;                       // room for edge names
+  const sc = Math.min((wMm-2*pad)/p.L, (hMm-2*pad)/p.W);
+  const w = p.L*sc, h = p.W*sc, ox = (wMm-w)/2, oy = (hMm-h)/2, b = p.band;
+  const T = e => b[e] ? 1.1 : 0.25;
+  let s = `<svg width="${wMm}mm" height="${hMm}mm" viewBox="0 0 ${wMm} ${hMm}">`;
+  s += `<rect x="${ox}" y="${oy}" width="${w}" height="${h}" fill="${p.sideB?'#eee':'#fff'}" stroke="none"/>`;
+  const L = (e,x1,y1,x2,y2) => s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#000" stroke-width="${T(e)}" stroke-linecap="square"/>`;
+  const i = e => b[e] ? 0.55 : 0;                      // pull heavy lines inside the outline
+  L('y0', ox, oy+h-i('y0'), ox+w, oy+h-i('y0')); L('yW', ox, oy+i('yW'), ox+w, oy+i('yW'));
+  L('x0', ox+i('x0'), oy, ox+i('x0'), oy+h);     L('xL', ox+w-i('xL'), oy, ox+w-i('xL'), oy+h);
+  if (ops) for (const o of p.top) { // top-face ops, as the Part sits on Side A
+    if (o.k==='drill') s += `<circle cx="${ox+o.x*sc}" cy="${oy+h-o.y*sc}" r="${Math.max(o.d/2*sc,0.25)}" fill="${o.z==null?'#000':'none'}" stroke="#000" stroke-width="0.12"/>`;
+    else s += `<rect x="${ox+o.x*sc}" y="${oy+h-(o.y+o.w)*sc}" width="${o.l*sc}" height="${Math.max(o.w*sc,0.3)}" fill="#999"/>`;
+  }
+  if (names) {
+    const f = font, t = (x,y,txt,rot=0,anchor='middle') => s += `<text x="${x}" y="${y}" font-size="${f}" text-anchor="${anchor}" ${rot?`transform="rotate(${rot} ${x} ${y})"`:''} fill="#000" font-weight="${txt.includes('▮')?700:400}">${txt}</text>`;
+    const nm = e => b[e] ? `▮ ${e}` : e;
+    t(ox+w/2, oy+h+f*1.05, nm('y0') + (b.y0?'':' · front')); t(ox+w/2, oy-f*0.35, nm('yW'));
+    t(ox-f*0.4, oy+h/2, nm('x0'), -90); t(ox+w+f*0.4, oy+h/2, nm('xL'), 90);
+  }
+  if (grain && grainOn(p)) { const gy = oy + h*0.5, gx = ox + w*0.18, gl = w*0.4;
+    s += `<line x1="${gx}" y1="${gy}" x2="${gx+gl}" y2="${gy}" stroke="#000" stroke-width="0.3"/><path d="M${gx+gl} ${gy} l-1.6 -0.9 v1.8z" fill="#000"/>`;
+    s += `<text x="${gx}" y="${gy-0.7}" font-size="1.7">grain</text>`; }
+  return s + '</svg>';
+}
+
+// ---------- shared: label grid geometry (all mm)
+function sheetsOf(items, g, draw, title) {
+  const per = g.cols*g.rows, out = [];
+  for (let k=0; k<items.length; k+=per) {
+    let h = '';
+    items.slice(k, k+per).forEach((p, j) => {
+      const c = j % g.cols, r = Math.floor(j / g.cols);
+      const x = g.left + c*(g.w+g.gx), y = g.top + r*(g.h+g.gy);
+      h += `<div class="lbl cutline" style="left:${x}mm;top:${y}mm;width:${g.w}mm;height:${g.h}mm">${draw(p, g)}</div>`;
+    });
+    out.push(`<section class="sheet">${h}</section>`);
+  }
+  return out.join('');
+}
+const warnings = p => (p.sideB ? `<span class="warn">◐ SIDE B ${p.sideB}</span>` : '') + (p.manual.length ? `<span class="warn">✋ ${p.manual.length} MANUAL</span>` : '') + (p.saw ? `<span class="warn">SAW</span>` : '');
+
+// ============================================================ VARIANT A — Compact 3×8, QR first
+// 70 × 37 mm, 3 across × 8 down, borderless (e.g. Herma 4453 / Avery 3474 style). 24 a sheet.
+function VariantA() {
+  const g = { cols:3, rows:8, w:70, h:37, gx:0, gy:0, left:0, top:0.5 };
+  return sheetsOf(ordered, g, p => {
+    const Q = qr(qrText(p), 17);
+    return `<div style="position:absolute;inset:2.5mm 3mm 2.5mm 3mm;display:flex;gap:2mm">
+      <div style="width:17mm;flex:none;display:flex;flex-direction:column;justify-content:space-between">${Q.svg}
+        <div class="mono" style="font-size:5.5pt;text-align:center">${p.blank?p.blank.id+' #'+p.no:p.loc}</div></div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-size:18pt;font-weight:800;line-height:1">${cabOf(p)}</span>
+          <span style="font-size:6pt;text-align:right">${p.sheet} · ${thick(p)} mm</span></div>
+        <div style="font-size:6.5pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${cabLine(p)}</div>
+        <div style="font-size:10pt;font-weight:700;margin-top:0.6mm">${human(p)}</div>
+        <div style="font-size:8.5pt" class="mono">${mm(p.L)} × ${mm(p.W)}</div>
+        <div style="margin-top:auto;display:flex;align-items:flex-end;justify-content:space-between;gap:1mm">
+          <div style="font-size:5.5pt;line-height:1.25">${warnings(p) || (grainOn(p)?'grain → along length':'')}</div>
+          ${outline(p, 13, 9, { grain:false })}</div>
+      </div></div>`;
+  }, 'A');
+}
+
+// ============================================================ VARIANT B — Drawing 2×7, the outline is the label
+// 99.1 × 38.1 mm, 2 across × 7 down (Avery L7163 layout: top 15.15, left 4.65, column gap 2.5). 14 a sheet.
+function VariantB() {
+  const g = { cols:2, rows:7, w:99.1, h:38.1, gx:2.5, gy:0, left:4.65, top:15.15 };
+  return sheetsOf(ordered, g, p => {
+    const Q = qr(qrText(p), 15);
+    const bands = bandNames(p);
+    return `<div style="position:absolute;inset:1.8mm 2.5mm;display:flex;gap:2mm">
+      <div style="width:44mm;flex:none;display:flex;flex-direction:column">
+        ${outline(p, 44, 28, { names:true, ops:true })}
+        <div style="font-size:5.5pt;margin-top:0.4mm">${bands.length?'▮ = '+bands.join(', '):'no banding'} · <b>TOP face shown ▲</b></div></div>
+      <div style="flex:1;min-width:0;position:relative">
+        <div style="font-size:7pt"><span style="font-size:15pt;font-weight:800">${cabOf(p)}</span> ${cabLine(p)}</div>
+        <div style="font-size:9.5pt;font-weight:700">${human(p)}</div>
+        <div class="mono" style="font-size:8pt">${mm(p.L)} × ${mm(p.W)} × ${thick(p)}</div>
+        <div style="font-size:6pt;margin-top:0.8mm;line-height:1.35">${warnings(p)}</div>
+        ${p.manual.length?`<div style="font-size:5.5pt;margin-top:0.5mm">${p.manual.join('<br>')}</div>`:''}
+        <div style="position:absolute;right:0;bottom:0;text-align:center">${Q.svg}<div class="mono" style="font-size:5pt">${p.loc}</div></div>
+      </div></div>`;
+  }, 'B');
+}
+
+// ============================================================ VARIANT C — Traveller 2×4, label carries the Step ticks
+// 99.1 × 67.7 mm, 2 across × 4 down (Avery L7165 layout: top 13.1, left 4.65, column gap 2.5). 8 a sheet.
+function VariantC() {
+  const g = { cols:2, rows:4, w:99.1, h:67.7, gx:2.5, gy:0, left:4.65, top:13.1 };
+  return sheetsOf(ordered, g, p => {
+    const Q = qr(qrText(p), 22);
+    const st = [['Cut',true],['Side B',!!p.sideB],['Banded',banded(p).length>0],['Manual',p.manual.length>0]];
+    return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+      <div style="background:#000;color:#fff;padding:1.2mm 3mm;display:flex;justify-content:space-between;align-items:baseline">
+        <span><span style="font-size:17pt;font-weight:800">${cabOf(p)}</span> <span style="font-size:8pt">${cabLine(p)}</span></span>
+        <span class="mono" style="font-size:7pt">${p.loc}</span></div>
+      <div style="flex:1;display:flex;gap:2mm;padding:1.5mm 3mm 0">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11pt;font-weight:700">${human(p)}</div>
+          <div class="mono" style="font-size:9pt">${mm(p.L)} × ${mm(p.W)} × ${thick(p)} <span style="font-size:6.5pt">${p.sheet}</span></div>
+          ${outline(p, 48, 26, { names:true, ops:true, font:2.1 })}
+          <div style="font-size:5.5pt">${bandNames(p).length?'▮ '+bandNames(p).join(', '):'no banding'}${grainOn(p)?' · grain → along L':''} · TOP face shown</div>
+        </div>
+        <div style="width:24mm;flex:none;display:flex;flex-direction:column;align-items:center">${Q.svg}
+          <div class="mono" style="font-size:5pt;margin-top:0.3mm">${qrText(p)}</div>
+          <div style="font-size:6pt;margin-top:1mm;line-height:1.4;text-align:center">${warnings(p).replace(/<\/span>/g,'</span><br>')}</div></div>
+      </div>
+      ${p.manual.length?`<div style="font-size:6pt;padding:0 3mm"><b>Manual:</b> ${p.manual.join(' · ')}</div>`:''}
+      <div style="display:flex;gap:4mm;padding:1.2mm 3mm 1.8mm;border-top:0.3mm solid #000;margin-top:0.8mm;font-size:7pt">
+        ${st.map(([n,on])=>on?`<span><span class="box"></span> ${n}</span>`:`<span style="color:#bbb">— ${n}</span>`).join('')}</div>
+    </div>`;
+  }, 'C');
+}
+
+// ============================================================ SIZE LADDER (appended to every variant)
+function ladder() {
+  const ids = [['short id', `${S.jobShort}:p017`], ['UUID id', `${S.jobShort}:3f2a9c1e-7b4d-4e0a-9c2b-5d8e1f6a7b30`]];
+  const sizes = [8, 10, 12, 15, 17, 20, 22];
+  let h = `<div style="padding:12mm"><h2 style="margin:0 0 2mm">Size ladder: print at 100 %, then scan</h2>
+    <div style="font-size:8pt;margin-bottom:4mm">Scan each code on the shop laptop: webcam in Scan mode, then the keyboard-wedge scanner. Note the smallest that reads first time from ~20 cm.
+    Quiet zone is 2 modules (A–C use 2). ECC level M. The real Part id format decides the row to trust: a short id keeps the code at 21×21 modules; a UUID needs 29×29, so each module is ~30 % smaller at the same print size.</div>`;
+  for (const [label, text] of ids) {
+    h += `<div style="font-weight:700;margin:3mm 0 1mm">${label}: <span class="mono">${text}</span></div><div style="display:flex;gap:5mm;align-items:flex-end">`;
+    for (const s of sizes) { const Q = qr(text, s); h += `<div style="text-align:center">${Q.svg}<div style="font-size:7pt;margin-top:1mm">${s} mm<br><span style="color:#666">${Q.modules}² · ${Q.moduleMm.toFixed(2)} mm/mod</span></div><div style="margin-top:1mm"><span class="box"></span> cam <span class="box"></span> gun</div></div>`; }
+    h += `</div>`;
+  }
+  h += `<div style="font-weight:700;margin:6mm 0 1mm">Quiet zone, at 12 mm</div><div style="display:flex;gap:6mm;align-items:flex-end">`;
+  for (const q of [0,1,2,4]) { const Q = qr(ids[0][1], 12, { quiet:q }); h += `<div style="text-align:center"><div style="outline:0.2mm solid #000;display:inline-block">${Q.svg}</div><div style="font-size:7pt;margin-top:1mm">${q} modules</div><div style="margin-top:1mm"><span class="box"></span> cam <span class="box"></span> gun</div></div>`; }
+  h += `</div><div style="font-weight:700;margin:6mm 0 1mm">Text at arm's length</div>`;
+  for (const pt of [5, 6, 7, 8, 10, 14, 18]) h += `<div style="font-size:${pt}pt;line-height:1.2"><span class="box"></span> ${pt} pt · B3 Left side 720 × 560 · W18-1-A #3 · ◐ SIDE B KIT-B1</div>`;
+  h += `<div style="font-weight:700;margin:6mm 0 1mm">Banded-edge line weight</div><div style="display:flex;gap:8mm;align-items:center">`;
+  for (const w of [0.6, 0.8, 1.1, 1.5]) h += `<div style="text-align:center"><svg width="30mm" height="12mm" viewBox="0 0 30 12"><rect x="1" y="1" width="28" height="10" fill="none" stroke="#000" stroke-width="0.25"/><line x1="1" y1="${11-w/2}" x2="29" y2="${11-w/2}" stroke="#000" stroke-width="${w}"/></svg><div style="font-size:7pt">${w} mm</div></div>`;
+  return `<section class="sheet">${h}</div></div></section>`;
+}
+
+// ============================================================ SWITCHER
+const VARIANTS = { A:['Compact 3×8 · 70×37',VariantA], B:['Drawing 2×7 · 99×38',VariantB], C:['Traveller 2×4 · 99×68',VariantC] };
+const keys = Object.keys(VARIANTS);
+const params = new URLSearchParams(location.search);
+let v = keys.includes(params.get('variant')) ? params.get('variant') : 'A';
+function render(){
+  document.getElementById('doc').innerHTML = VARIANTS[v][1]() + ladder();
+  const n = document.querySelectorAll('.sheet').length;
+  document.getElementById('vlabel').textContent = `${v} (${VARIANTS[v][0]}) · ${ordered.length} labels · ${n-1} sheets + ladder`;
+  document.title = `Part labels prototype ${v}`;
+  window.__state = { variant:v, labels:ordered.length, sheets:n-1, first:ordered.slice(0,4).map(p=>p.loc+' '+p.display+' '+qrText(p)), sideB:ordered.filter(p=>p.sideB).length, manual:ordered.filter(p=>p.manual.length).map(p=>p.display) };
+}
+function go(d){ v = keys[(keys.indexOf(v)+d+keys.length)%keys.length]; history.replaceState(null,'','?variant='+v); render(); scrollTo(0,0); }
+document.getElementById('prev').onclick=()=>go(-1); document.getElementById('next').onclick=()=>go(1);
+addEventListener('keydown',e=>{ if (e.target.closest('input,textarea,[contenteditable]')) return; if(e.key==='ArrowLeft')go(-1); if(e.key==='ArrowRight')go(1); });
+render();
+</script>
+</body>
+</html>
