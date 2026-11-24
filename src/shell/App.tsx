@@ -9,6 +9,7 @@ import { ReimportDiff, ReimportLog, SparesList } from './ReimportDiff.tsx';
 import { ScanMode } from './ScanMode.tsx';
 import { SettingsScreen } from './SettingsScreen.tsx';
 import { useJobSession } from './useJobSession.ts';
+import { ReskinPrototype, variantParam } from './prototype-reskin/index.tsx';
 
 /** The chosen file of a file input, which is then cleared so the same file can be chosen again. */
 function takeFile(e: ChangeEvent<HTMLInputElement>): File | undefined {
@@ -24,6 +25,9 @@ export function App() {
   const job = open?.job ?? null;
   const [view, setView] = useState<'job' | 'settings' | 'scan'>('job');
   const schemaErrors = state.issues.filter((i) => i.kind === 'schema');
+
+  // PROTOTYPE (reskin): dev builds, or any build with ?variant=, show the layout variants.
+  if (import.meta.env.DEV || variantParam() !== null) return <ReskinPrototype session={session} />;
 
   const navButton = (to: typeof view, label: string) => (
     <button
