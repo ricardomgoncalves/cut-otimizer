@@ -10,7 +10,7 @@ const url = pathToFileURL(path.join(dir, 'index.html')).href;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 900, height: 1200 }, deviceScaleFactor: 2 });
 page.on('pageerror', e => console.error('page error:', e.message));
-for (const v of ['A', 'B', 'C']) {
+for (const v of ['A', 'B', 'C', 'D']) {
   await page.goto(`${url}?variant=${v}`);
   const state = await page.evaluate(() => window.__state);
   console.log(JSON.stringify(state));

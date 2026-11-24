@@ -5,6 +5,7 @@
     A  Compact 3×8   (70 × 37 mm, 24 a sheet, borderless): QR first, text, tiny edge glyph
     B  Drawing 2×7   (99.1 × 38.1 mm, 14 a sheet, Avery L7163 layout): the Part outline is the label
     C  Traveller 2×4 (99.1 × 67.7 mm, 8 a sheet, Avery L7165 layout): label carries its own Step ticks
+    D  The user's pick: B's drawing layout + C's Step ticks, stuck on the hidden (bottom) face. Default.
   Every variant ends with the same SIZE LADDER page: print it, then scan each QR with the shop laptop's
   webcam and the keyboard-wedge scanner, and read the text sizes at arm's length.
   Labels are in work order: Blanks in id order, Parts by number within the Blank, then Saw Parts.
@@ -67,31 +68,54 @@ function qr(text, sizeMm, { ecc='M', quiet=2 }={}) {
 }
 
 // ---------- Part outline in the Part's own frame: x0 left, xL right, y0 bottom (front), yW top. Banded edges heavy.
-function outline(p, wMm, hMm, { names=false, ops=false, grain=true, font=1.9 }={}) {
+function outline(p, wMm, hMm, { names=false, ops=false, grain=true, font=1.9, face='top', spot=false }={}) {
+  // face 'top': looking at the top face (y0 at the bottom of the drawing).
+  // face 'bottom': the Part turned over front-to-back, looking at the bottom face (y0 at the top). x0 stays left.
   const pad = names ? 3.2 : 0.8;                       // room for edge names
   const sc = Math.min((wMm-2*pad)/p.L, (hMm-2*pad)/p.W);
   const w = p.L*sc, h = p.W*sc, ox = (wMm-w)/2, oy = (hMm-h)/2, b = p.band;
+  const bot = face==='top' ? 'y0' : 'yW', top = face==='top' ? 'yW' : 'y0';
+  const SY = y => face==='top' ? oy+h-y*sc : oy+y*sc;  // Part y (mm) -> drawing y
   const T = e => b[e] ? 1.1 : 0.25;
   let s = `<svg width="${wMm}mm" height="${hMm}mm" viewBox="0 0 ${wMm} ${hMm}">`;
   s += `<rect x="${ox}" y="${oy}" width="${w}" height="${h}" fill="${p.sideB?'#eee':'#fff'}" stroke="none"/>`;
   const L = (e,x1,y1,x2,y2) => s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#000" stroke-width="${T(e)}" stroke-linecap="square"/>`;
   const i = e => b[e] ? 0.55 : 0;                      // pull heavy lines inside the outline
-  L('y0', ox, oy+h-i('y0'), ox+w, oy+h-i('y0')); L('yW', ox, oy+i('yW'), ox+w, oy+i('yW'));
+  L(bot, ox, oy+h-i(bot), ox+w, oy+h-i(bot)); L(top, ox, oy+i(top), ox+w, oy+i(top));
   L('x0', ox+i('x0'), oy, ox+i('x0'), oy+h);     L('xL', ox+w-i('xL'), oy, ox+w-i('xL'), oy+h);
-  if (ops) for (const o of p.top) { // top-face ops, as the Part sits on Side A
-    if (o.k==='drill') s += `<circle cx="${ox+o.x*sc}" cy="${oy+h-o.y*sc}" r="${Math.max(o.d/2*sc,0.25)}" fill="${o.z==null?'#000':'none'}" stroke="#000" stroke-width="0.12"/>`;
-    else s += `<rect x="${ox+o.x*sc}" y="${oy+h-(o.y+o.w)*sc}" width="${o.l*sc}" height="${Math.max(o.w*sc,0.3)}" fill="#999"/>`;
+  // ops visible on this face: its own ops, plus through holes from the other face
+  const shown = face==='top' ? p.top.map(o=>({...o,own:true})).concat(p.bottom.filter(o=>o.k==='drill'&&o.z==null))
+                             : p.bottom.map(o=>({...o,own:true})).concat(p.top.filter(o=>o.k==='drill'&&o.z==null));
+  if (ops) for (const o of shown) {
+    if (o.k==='drill') s += `<circle cx="${ox+o.x*sc}" cy="${SY(o.y)}" r="${Math.max(o.d/2*sc,0.25)}" fill="${o.z==null?'#000':'none'}" stroke="#000" stroke-width="${o.own?0.18:0.12}"/>`;
+    else s += `<rect x="${ox+o.x*sc}" y="${Math.min(SY(o.y),SY(o.y+o.w))}" width="${o.l*sc}" height="${Math.max(o.w*sc,0.3)}" fill="#999"/>`;
   }
+  if (spot && spot.ok) { const rx = ox+spot.x*sc, ry = Math.min(SY(spot.y),SY(spot.y+spot.h)), rw = spot.w*sc, rh = spot.h*sc;
+    s += `<rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="#c8c8c8" stroke="#000" stroke-width="0.2"/>`;
+    if (rw > 7) s += `<text x="${rx+rw/2}" y="${ry+rh/2+0.6}" font-size="1.7" text-anchor="middle">label</text>`; }
   if (names) {
     const f = font, t = (x,y,txt,rot=0,anchor='middle') => s += `<text x="${x}" y="${y}" font-size="${f}" text-anchor="${anchor}" ${rot?`transform="rotate(${rot} ${x} ${y})"`:''} fill="#000" font-weight="${txt.includes('▮')?700:400}">${txt}</text>`;
-    const nm = e => b[e] ? `▮ ${e}` : e;
-    t(ox+w/2, oy+h+f*1.05, nm('y0') + (b.y0?'':' · front')); t(ox+w/2, oy-f*0.35, nm('yW'));
+    const nm = e => (b[e] ? `▮ ${e}` : e) + (e==='y0' && !b.y0 ? ' · front' : '');
+    t(ox+w/2, oy+h+f*1.05, nm(bot)); t(ox+w/2, oy-f*0.35, nm(top));
     t(ox-f*0.4, oy+h/2, nm('x0'), -90); t(ox+w+f*0.4, oy+h/2, nm('xL'), 90);
   }
-  if (grain && grainOn(p)) { const gy = oy + h*0.5, gx = ox + w*0.18, gl = w*0.4;
+  if (grain && grainOn(p)) { const gy = oy + h*(spot&&spot.ok?0.86:0.5), gx = ox + w*0.18, gl = w*0.4;
     s += `<line x1="${gx}" y1="${gy}" x2="${gx+gl}" y2="${gy}" stroke="#000" stroke-width="0.3"/><path d="M${gx+gl} ${gy} l-1.6 -0.9 v1.8z" fill="#000"/>`;
     s += `<text x="${gx}" y="${gy-0.7}" font-size="1.7">grain</text>`; }
   return s + '</svg>';
+}
+
+// ---------- where the sticker can go on the bottom face: clear of every op on it (bottom ops, through holes,
+// grooves are top-only so ignored), 15 mm from the edges, as near the middle as possible. Part frame, mm.
+function labelSpot(p, lw=99.1, lh=38.1, edge=15) {
+  const hits = p.bottom.concat(p.top.filter(o=>o.k==='drill'&&o.z==null)).map(o=>({x:o.x-o.d/2-3, y:o.y-o.d/2-3, w:o.d+6, h:o.d+6}));
+  const cands = [];
+  for (const [w,h,rot] of [[lw,lh,false],[lh,lw,true]])
+    for (let x=edge; x+w<=p.L-edge; x+=5) for (let y=edge; y+h<=p.W-edge; y+=5) {
+      if (hits.some(r => x<r.x+r.w && r.x<x+w && y<r.y+r.h && r.y<y+h)) continue;
+      cands.push({x,y,w,h,rot,ok:true, d:Math.hypot(x+w/2-p.L/2, y+h/2-p.W/2) + (rot?40:0)});
+    }
+  return cands.sort((a,b)=>a.d-b.d)[0] || { ok:false };
 }
 
 // ---------- shared: label grid geometry (all mm)
@@ -184,6 +208,36 @@ function VariantC() {
   }, 'C');
 }
 
+// ============================================================ VARIANT D — B's drawing + C's Step ticks, stuck on the hidden face
+// 99.1 × 38.1 mm, 2 × 7 (Avery L7163 layout). The sticker goes on the `bottom` face (inside of a door, outside of a
+// carcass side): the face that ends up hidden. So the drawing shows the BOTTOM face, the way you see the Part
+// with its label up, and marks a spot clear of every op on that face.
+function VariantD() {
+  const g = { cols:2, rows:7, w:99.1, h:38.1, gx:2.5, gy:0, left:4.65, top:15.15 };
+  return sheetsOf(ordered, g, p => {
+    const Q = qr(qrText(p), 14);
+    const bands = bandNames(p), spot = labelSpot(p);
+    const st = [['Cut',true],['Side B',!!p.sideB],['Banded',banded(p).length>0],['Manual',p.manual.length>0]];
+    return `<div style="position:absolute;inset:1.4mm 2.5mm 0;display:flex;flex-direction:column">
+      <div style="flex:1;display:flex;gap:2mm;min-height:0">
+        <div style="width:42mm;flex:none;display:flex;flex-direction:column">
+          ${outline(p, 42, 27, { names:true, ops:true, face:'bottom', spot })}
+          <div style="font-size:5.2pt;margin-top:0.2mm;white-space:nowrap;overflow:hidden">${bands.length?'▮ '+bands.join(', '):'no banding'} · <b>BOTTOM face ▼</b> · ▩ sticker</div></div>
+        <div style="flex:1;min-width:0;position:relative">
+          <div style="font-size:7pt;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:15mm"><span style="font-size:15pt;font-weight:800">${cabOf(p)}</span> ${cabLine(p)}</div>
+          <div style="font-size:9.5pt;font-weight:700;margin-right:15mm">${human(p)}</div>
+          <div class="mono" style="font-size:8pt">${mm(p.L)} × ${mm(p.W)} × ${thick(p)}</div>
+          <div style="font-size:6pt;margin-top:0.6mm;line-height:1.35">${warnings(p)}</div>
+          ${p.manual.length?`<div style="font-size:5.3pt;margin-top:0.3mm;line-height:1.2">${p.manual.join('<br>')}</div>`:''}
+          <div style="position:absolute;right:0;top:0;text-align:center">${Q.svg}<div class="mono" style="font-size:4.8pt">${p.loc}</div></div>
+        </div></div>
+      <div style="display:flex;gap:3.5mm;align-items:center;border-top:0.3mm solid #000;padding:0.9mm 0 1.2mm;font-size:6.5pt">
+        ${st.map(([n,on])=>on?`<span><span class="box" style="width:3mm;height:3mm"></span> ${n}</span>`:`<span style="color:#bbb">— ${n}</span>`).join('')}
+        <span style="margin-left:auto;font-size:5pt;color:#444">${spot.ok?'':'no clear spot: stick on an edge-free area by hand'}</span></div>
+    </div>`;
+  }, 'D');
+}
+
 // ============================================================ SIZE LADDER (appended to every variant)
 function ladder() {
   const ids = [['short id', `${S.jobShort}:p017`], ['UUID id', `${S.jobShort}:3f2a9c1e-7b4d-4e0a-9c2b-5d8e1f6a7b30`]];
@@ -206,10 +260,10 @@ function ladder() {
 }
 
 // ============================================================ SWITCHER
-const VARIANTS = { A:['Compact 3×8 · 70×37',VariantA], B:['Drawing 2×7 · 99×38',VariantB], C:['Traveller 2×4 · 99×68',VariantC] };
+const VARIANTS = { A:['Compact 3×8 · 70×37',VariantA], B:['Drawing 2×7 · 99×38',VariantB], C:['Traveller 2×4 · 99×68',VariantC], D:['B + ticks, hidden face · 2×7',VariantD] };
 const keys = Object.keys(VARIANTS);
 const params = new URLSearchParams(location.search);
-let v = keys.includes(params.get('variant')) ? params.get('variant') : 'A';
+let v = keys.includes(params.get('variant')) ? params.get('variant') : 'D';
 function render(){
   document.getElementById('doc').innerHTML = VARIANTS[v][1]() + ladder();
   const n = document.querySelectorAll('.sheet').length;
