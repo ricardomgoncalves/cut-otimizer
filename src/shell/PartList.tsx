@@ -1,5 +1,6 @@
 import { partMode, type Job } from '../core/job.ts';
-import { isLive, livePartIds, type SawReason, type SheetPlan } from '../core/planner/index.ts';
+import { isLive, livePartIds } from '../core/plan-queries.ts';
+import type { SawReason, SheetPlan } from '../core/planner/index.ts';
 import { isCut, isDone, steps, STEPS, type Progress, type Step } from '../core/progress.ts';
 import { mmExact } from '../core/units.ts';
 import { STEP_LABELS } from './step-labels.ts';

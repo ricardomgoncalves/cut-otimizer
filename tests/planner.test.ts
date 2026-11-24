@@ -2,11 +2,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
 import type { Model, Part } from '../src/core/model.ts';
+import { discardOffcut, remakePart } from '../src/core/plan-queries.ts';
 import {
-  discardOffcut,
   partRule,
   plan,
-  remakePart,
   type Blank,
   type Board,
   type Plan,

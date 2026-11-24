@@ -10,21 +10,16 @@
 // edits only record the choice; the next Regenerate applies it.
 import { freezeLockedPages } from './documents/index.ts';
 import type { Model } from './model.ts';
+import { blankLocked, boardLocked, discardOffcut, isLive, livePartIds, remakePart } from './plan-queries.ts';
 import {
-  blankLocked,
-  boardLocked,
-  discardOffcut,
-  isLive,
-  livePartIds,
   partRule,
   plan,
-  remakePart,
   type Board,
   type PartMode,
   type Plan,
 } from './planner/index.ts';
 import { boardId, isCut, type Progress } from './progress.ts';
-import { settingsChanges, type Settings } from './settings.ts';
+import type { Settings } from './settings.ts';
 
 export interface Job {
   model: Model;
@@ -232,11 +227,6 @@ export function pendingChoices(job: Job, progress: Progress): PendingChoices {
       .map((p) => p.id),
     sheetCodes: job.plan.sheets.filter((s) => s.code !== sheetCode(job, s.sheetId)).map((s) => s.sheetId),
   };
-}
-
-/** The settings fields where the Job's snapshot differs from the current global settings. */
-export function snapshotChanges(job: Job, current: Settings): (keyof Settings)[] {
-  return settingsChanges(job.settings, current);
 }
 
 /** The Sheet code in use for a Sheet: the edited one, else the derived one. */

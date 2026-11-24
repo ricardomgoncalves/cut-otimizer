@@ -1,8 +1,9 @@
 import { APP_NAME } from '../core/app.ts';
 import { partLocations } from '../core/documents/index.ts';
-import { nestingQueue, partMode, pendingChoices, sheetCode, snapshotChanges, type Job } from '../core/job.ts';
+import { nestingQueue, partMode, pendingChoices, sheetCode, type Job } from '../core/job.ts';
 import { partNamer } from '../core/model.ts';
 import { reprintSelection, rollup } from '../core/progress.ts';
+import { settingsChanges } from '../core/settings.ts';
 import { CutSheetPanel } from './CutSheetPanel.tsx';
 import { LabelsPanel } from './LabelsPanel.tsx';
 import { ProgressPanel } from './ProgressPanel.tsx';
@@ -30,7 +31,7 @@ export function PlannedJob({ session, open, job }: Props) {
   const sideBById = new Map(job.plan.sideB.flatMap((f) => f.partIds.map((id) => [id, f.id])));
   const sideBOf = (id: string) => sideBById.get(id);
   const where = partLocations(job.plan);
-  const changed = snapshotChanges(job, state.settings);
+  const changed = settingsChanges(job.settings, state.settings);
   const pending = pendingChoices(job, progress);
   const queue = nestingQueue(job);
   const rolled = rollup(job, progress);

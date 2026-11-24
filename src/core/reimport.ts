@@ -16,12 +16,8 @@ import { partLocations, partRunOrder } from './documents/work.ts';
 import { freeSheetCode } from './import/index.ts';
 import { withHandFixes, type JobDocument, type Spare } from './job-store/document.ts';
 import type { CncOp, ManualOp, Model, Owner, Part, PartEdges, Sheet } from './model.ts';
+import { blankLocked, boardLocked, isLive, livePartIds, remakePart } from './plan-queries.ts';
 import {
-  blankLocked,
-  boardLocked,
-  isLive,
-  livePartIds,
-  remakePart,
   sideB,
   type Placement,
   type Plan,

@@ -2,7 +2,8 @@
 // those ticks (PRD stories 9.1, 9.2, 9.6 and 9.7). Ticks are keyed by Export Part id and stored in the
 // Job document; roll-ups are always computed, never stored.
 import type { Job } from './job.ts';
-import { blankLocked, boardLocked, isLive, livePartIds, type Blank, type Board, type SheetPlan } from './planner/index.ts';
+import { blankLocked, boardLocked, isLive, livePartIds } from './plan-queries.ts';
+import type { Blank, Board, SheetPlan } from './planner/index.ts';
 
 /** One tracked stage of a Part, in Run order. */
 export type Step = 'cut' | 'sideB' | 'banded' | 'manualOps';

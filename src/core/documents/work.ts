@@ -2,7 +2,8 @@
 // "Order of work"), Part Run order and locations, and the cells every Part table repeats.
 import type { ReimportLogEntry, Spare } from '../job-store/document.ts';
 import { partNamer, type Model, type Part, type PartEdge } from '../model.ts';
-import { isLive, livePartIds, type Blank, type Placement, type Plan, type SawPlacement, type SheetPlan } from '../planner/index.ts';
+import { isLive, livePartIds } from '../plan-queries.ts';
+import type { Blank, Placement, Plan, SawPlacement, SheetPlan } from '../planner/index.ts';
 import { steps, type ReprintSelection, type Step } from '../progress.ts';
 import { sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, GREY, MARGIN, text, type Cell, type Column } from './layout.ts';

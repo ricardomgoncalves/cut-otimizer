@@ -2,7 +2,8 @@
 // (top view, origin front-left), the Part table with Step ticks, the Blank's Manual ops and a
 // "Side A done" box.
 import type { Model, PartEdge, Point } from '../model.ts';
-import { blankLocked, type Blank, type PartPrint, type Placement, type Plan, type SheetPlan, type SideAPrint } from '../planner/index.ts';
+import { blankLocked } from '../plan-queries.ts';
+import type { Blank, PartPrint, Placement, Plan, SheetPlan, SideAPrint } from '../planner/index.ts';
 import { steps } from '../progress.ts';
 import { arrow, circle, flipMark, opItems } from './drawing.ts';
 import { mmText, sizeText } from './format.ts';

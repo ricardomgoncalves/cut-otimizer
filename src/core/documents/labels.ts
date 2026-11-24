@@ -2,7 +2,8 @@
 // in Run order, stuck on the Part's `bottom` face (the face that ends up hidden). Each label draws that face
 // as seen with the label up, says what the Part is, carries the QR code Scan mode reads, and a Step tick row.
 import type { CncOp, Model, Part, PartEdge } from '../model.ts';
-import { isLive, type Plan } from '../planner/index.ts';
+import { isLive } from '../plan-queries.ts';
+import type { Plan } from '../planner/index.ts';
 import { scanPayload, steps, type Step } from '../progress.ts';
 import { mmText } from './format.ts';
 import { GREY, WHITE, fitSize, text, tickBox } from './layout.ts';

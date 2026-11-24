@@ -16,13 +16,12 @@ import {
   setPartMode,
   setSheetCode,
   sheetCode,
-  snapshotChanges,
   type Job,
 } from '../src/core/job.ts';
 import type { Model } from '../src/core/model.ts';
 import type { Board } from '../src/core/planner/index.ts';
 import { apply, type Progress } from '../src/core/progress.ts';
-import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
+import { DEFAULT_SETTINGS, settingsChanges, type Settings } from '../src/core/settings.ts';
 
 /** Boards without their Locked Blanks' frozen Side A pages (`Blank.sideA`), which a regenerate adds. */
 function unfrozen(boards: readonly Board[] | undefined): Board[] | undefined {
@@ -57,7 +56,7 @@ describe('Job settings snapshot', () => {
 
     expect(job.settings).toEqual(settings);
     expect(job.plan.settings).toEqual(settings);
-    expect(snapshotChanges(job, settings)).toEqual([]);
+    expect(settingsChanges(job.settings, settings)).toEqual([]);
   });
 
   it("doesn't change its DXFs when the global settings change, until it is regenerated", () => {
@@ -67,11 +66,11 @@ describe('Job settings snapshot', () => {
 
     // The maker edits the global settings afterwards.
     const edited: Settings = { ...global, clampMargin: 100000 };
-    expect(snapshotChanges(job, edited)).toEqual(['clampMargin']);
+    expect(settingsChanges(job.settings, edited)).toEqual(['clampMargin']);
     expect(toDxfFiles(job.plan, 'J1')).toEqual(before);
 
     const regenerated = regenerate(job, edited);
-    expect(snapshotChanges(regenerated, edited)).toEqual([]);
+    expect(settingsChanges(regenerated.settings, edited)).toEqual([]);
     expect(toDxfFiles(regenerated.plan, 'J1').get('W18-1-A.side-a.dxf')).not.toEqual(before.get('W18-1-A.side-a.dxf'));
     expect(toDxfFiles(regenerated.plan, 'J1').get('W18-1-A.side-a.dxf')).toContain('\n100\n');
   });
