@@ -148,7 +148,7 @@ function buildModel(file: PartsExport): ImportResult {
     thickness: e.thickness,
     width: e.width,
   }));
-  return { model: { projectName: file.project.name, sheets, edgebands, owners, parts }, issues };
+  return { model: { projectName: file.project.name, exportedAt: file.exportedAt, sheets, edgebands, owners, parts }, issues };
 }
 
 /**
@@ -193,16 +193,25 @@ function toCncOp(op: ExportOp, offset: Point): CncOp {
 }
 
 /**
+ * The derived Sheet code for a Sheet name and thickness that no code in `used` has: `W18`, else `W18B`,
+ * `W18C`, ... Re-import uses it to give new Sheets codes beside the Job's existing ones.
+ */
+export function freeSheetCode(name: string, thickness: number, used: ReadonlySet<string>): string {
+  const initial = (/[A-Za-z0-9]/.exec(name)?.[0] ?? 'S').toUpperCase();
+  const base = `${initial}${mmToken(thickness)}`;
+  let code = base;
+  for (let i = 1; used.has(code); i++) code = `${base}${String.fromCharCode(65 + i)}`;
+  return code;
+}
+
+/**
  * Sheet code: the first letter of the Sheet name and its thickness in mm (`W18`).
  * A clash with an earlier Sheet gets a letter suffix (`W18B`, `W18C`, ...).
  */
 function sheetsWithCodes(sheets: ExportSheet[]): Sheet[] {
   const used = new Set<string>();
   return sheets.map((s) => {
-    const initial = (/[A-Za-z0-9]/.exec(s.name)?.[0] ?? 'S').toUpperCase();
-    const base = `${initial}${mmToken(s.thickness)}`;
-    let code = base;
-    for (let i = 1; used.has(code); i++) code = `${base}${String.fromCharCode(65 + i)}`;
+    const code = freeSheetCode(s.name, s.thickness, used);
     used.add(code);
     return {
       id: s.id,

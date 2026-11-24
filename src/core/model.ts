@@ -114,6 +114,11 @@ export interface ManualOp {
 
 export interface Model {
   projectName: string;
+  /**
+   * The export's `exportedAt` (ISO 8601). Set by Import; optional so hand-built models in tests can leave it
+   * out. Re-import warns when a new file is older than the current one.
+   */
+  exportedAt?: string;
   /** In export order (by id, shortest first). */
   sheets: Sheet[];
   /** In export order. */
