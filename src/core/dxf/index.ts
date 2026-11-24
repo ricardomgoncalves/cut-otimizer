@@ -209,8 +209,7 @@ function writeDxf(layers: string[], entities: Entity[]): string {
   g(2, 'HEADER');
   g(9, '$ACADVER');
   g(1, 'AC1009');
-  g(9, '$INSUNITS');
-  g(70, 4); // millimetres
+  // R12 has no units variable ($INSUNITS came with R14): the grammar fixes units to mm.
   g(0, 'ENDSEC');
 
   g(0, 'SECTION');

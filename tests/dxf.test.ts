@@ -139,6 +139,12 @@ describe('toDxfFiles', () => {
     expect(files.get('J7-B1.side-b.dxf')).toBe(golden);
   });
 
+  it('writes an R12 header: $ACADVER AC1009 and no variable R12 does not have', () => {
+    const text = toDxfFiles(handPlan, 'J7').get('W18-1-A.side-a.dxf') ?? '';
+    const header = text.slice(0, text.indexOf('ENDSEC'));
+    expect(header.split('\n').filter((line) => line.startsWith('$'))).toEqual(['$ACADVER']);
+  });
+
   it('gives byte-identical files for the same export, planned twice', () => {
     const run = () => {
       const json: unknown = JSON.parse(
