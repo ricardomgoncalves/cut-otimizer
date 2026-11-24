@@ -116,7 +116,18 @@ export interface BoardProgress {
   /** Its Blanks' Parts and its Saw Parts. */
   cut: number;
   total: number;
+  /** Its Saw Parts alone ("Breakdown done"). */
+  sawCut: number;
+  sawTotal: number;
   locked: boolean;
+}
+
+export interface SideBProgress {
+  /** `B1`. */
+  id: string;
+  /** Parts ticked Side B. */
+  done: number;
+  total: number;
 }
 
 export interface SheetProgress {
@@ -144,6 +155,8 @@ export interface Rollup {
   boards: BoardProgress[];
   /** In Run order. */
   sheets: SheetProgress[];
+  /** In file order. */
+  sideB: SideBProgress[];
   /** Cabinets, then Generated Items, in export order. Owners without Parts are left out. */
   owners: OwnerProgress[];
   job: { cut: number; done: number; total: number };
@@ -169,7 +182,16 @@ export function rollup(job: JobView, progress: Progress): Rollup {
       });
     }
     const ids = boardParts(board);
-    boardRows.push({ id, sheetId: sheet.sheetId, cut: cutOf(ids), total: ids.length, locked: boardLocked(board, cutNow) });
+    const saw = board.sawParts.filter(isLive).map((p) => p.partId);
+    boardRows.push({
+      id,
+      sheetId: sheet.sheetId,
+      cut: cutOf(ids),
+      total: ids.length,
+      sawCut: cutOf(saw),
+      sawTotal: saw.length,
+      locked: boardLocked(board, cutNow),
+    });
   }
 
   const sheets = job.plan.sheets.map((sheet): SheetProgress => {
@@ -196,8 +218,14 @@ export function rollup(job: JobView, progress: Progress): Rollup {
       ];
     });
 
+  const sideB = job.plan.sideB.map((f): SideBProgress => ({
+    id: f.id,
+    done: f.partIds.filter((id) => progress[id]?.sideB !== undefined).length,
+    total: f.partIds.length,
+  }));
+
   const all = job.model.parts.map((p) => p.id);
-  return { blanks, boards: boardRows, sheets, owners, job: { cut: cutOf(all), done: done.size, total: all.length } };
+  return { blanks, boards: boardRows, sheets, sideB, owners, job: { cut: cutOf(all), done: done.size, total: all.length } };
 }
 
 /**

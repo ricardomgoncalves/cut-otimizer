@@ -129,3 +129,12 @@ export interface Model {
   /** In export order. */
   parts: Part[];
 }
+
+/**
+ * How a Part is shown to people, by id: its display name, else the id itself (a Part a stale Plan still
+ * holds but the model no longer has).
+ */
+export function partNamer(model: Pick<Model, 'parts'>): (partId: string) => string {
+  const names = new Map(model.parts.map((p) => [p.id, p.displayName]));
+  return (id) => names.get(id) ?? id;
+}

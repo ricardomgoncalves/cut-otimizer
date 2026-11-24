@@ -7,6 +7,7 @@ import {
   generateJob,
   lockedBoards,
   needsNesting,
+  nestingQueue,
   partMode,
   pendingChoices,
   regenerate,
@@ -307,6 +308,13 @@ describe('Remake and kept Offcuts', () => {
     expect(asked.plan.sheets[0]?.overflow).toEqual([SHELF]);
     expect(needsNesting(asked)).toEqual([SHELF]);
     expect(asked.plan.sheets[0]?.boards.map((b) => b.number)).toEqual([1]);
+    // The shell asks: "Add Board 2 of 2 to W18".
+    expect(nestingQueue(asked)).toEqual({
+      waiting: [],
+      requests: [{ sheetId: W18(model), code: 'W18', partIds: [SHELF], first: 2, last: 2 }],
+    });
+    // Before the regenerate, the Remake only waits for it.
+    expect(nestingQueue(marked.job)).toEqual({ waiting: [SHELF], requests: [] });
 
     const added = addBoards(asked, [W18(model)], marked.progress);
     expect(added.plan.sheets[0]?.overflow).toEqual([]);

@@ -115,13 +115,19 @@ describe('Roll-ups', () => {
       { id: 'O16-1-A', cut: 0, done: 0, total: 1, locked: false },
     ]);
     expect(r.boards).toEqual([
-      { id: 'W18-1', sheetId: expect.any(String), cut: 4, total: 4, locked: true },
-      { id: 'O16-1', sheetId: expect.any(String), cut: 0, total: 1, locked: false },
+      { id: 'W18-1', sheetId: expect.any(String), cut: 4, total: 4, sawCut: 2, sawTotal: 2, locked: true },
+      { id: 'O16-1', sheetId: expect.any(String), cut: 0, total: 1, sawCut: 0, sawTotal: 0, locked: false },
     ]);
     expect(r.sheets.map(({ code, cut, total }) => ({ code, cut, total }))).toEqual([
       { code: 'W18', cut: 4, total: 4 },
       { code: 'O16', cut: 0, total: 1 },
     ]);
+  });
+
+  it('count the Parts run on each Side B file', () => {
+    expect(rollup(job, progress).sideB).toEqual([{ id: 'B1', done: 0, total: 1 }]);
+    const run = apply(job, progress, { kind: 'sideBDone', fileId: 'B1', at: T2 });
+    expect(rollup(job, run).sideB).toEqual([{ id: 'B1', done: 1, total: 1 }]);
   });
 
   it('count Done per Owner, Cabinets first, and the Job as a whole', () => {

@@ -126,6 +126,36 @@ export function needsNesting(job: Pick<Job, 'model' | 'plan'>): string[] {
   return job.model.parts.filter((p) => !placed.has(p.id)).map((p) => p.id);
 }
 
+/** The Parts of a Sheet that fit no kept Offcut and no unlocked Board, and the Boards adding them takes. */
+export interface BoardRequest {
+  sheetId: string;
+  code: string;
+  partIds: string[];
+  /** The new Boards' numbers would run `first`–`last` (the Sheet then has `last` Boards). */
+  first: number;
+  last: number;
+}
+
+/**
+ * What waits for nesting: Parts the next Regenerate nests (`waiting`: Remakes, Parts moved off Blanks), and
+ * per Sheet the Parts that only fit if the person agrees to more Boards (`requests`, for `addBoards`).
+ */
+export function nestingQueue(job: Pick<Job, 'model' | 'plan'>): { waiting: string[]; requests: BoardRequest[] } {
+  const overflow = new Set(job.plan.sheets.flatMap((s) => s.overflow ?? []));
+  return {
+    waiting: needsNesting(job).filter((id) => !overflow.has(id)),
+    requests: job.plan.sheets
+      .filter((s) => (s.overflow ?? []).length > 0)
+      .map((s) => ({
+        sheetId: s.sheetId,
+        code: s.code,
+        partIds: [...(s.overflow ?? [])],
+        first: s.boards.length + 1,
+        last: s.boards.length + Math.max(1, s.extraBoards ?? 1),
+      })),
+  };
+}
+
 /** Discards a kept Offcut (it is no longer stock for Parts that need nesting), or undoes that. */
 export function setOffcutDiscarded(job: Job, offcutId: string, discarded: boolean): { job: Job } | { error: string } {
   const next = discardOffcut(job.plan, offcutId, discarded);

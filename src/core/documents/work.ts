@@ -1,7 +1,7 @@
 // Shared pieces of the cut sheet's pages: the work-page header, the numbered sections (the cover's
 // "Order of work"), Part Run order and locations, and the cells every Part table repeats.
 import type { ReimportLogEntry, Spare } from '../job-store/document.ts';
-import type { Model, Part, PartEdge } from '../model.ts';
+import { partNamer, type Model, type Part, type PartEdge } from '../model.ts';
 import { isLive, livePartIds, type Blank, type Placement, type Plan, type SawPlacement, type SheetPlan } from '../planner/index.ts';
 import { steps, type ReprintSelection, type Step } from '../progress.ts';
 import { sizeText } from './format.ts';
@@ -38,8 +38,7 @@ export function printsPart(job: CutSheetJob, partId: string): boolean {
 export const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;
 
 export function partName(job: CutSheetJob): (partId: string) => string {
-  const names = new Map(job.model.parts.map((p) => [p.id, p.displayName]));
-  return (id) => names.get(id) ?? id;
+  return partNamer(job.model);
 }
 
 /** The page header of a work page: title, subtitle and the Job at the right. Returns where content starts. */
