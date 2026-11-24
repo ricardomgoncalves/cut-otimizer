@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { SETTING_LABELS } from './setting-labels.ts';
 import type { Sheet } from '../core/model.ts';
+import { fromMm, mmExact } from '../core/units.ts';
 import {
   DEFAULT_SETTINGS,
   OP_KINDS,
@@ -30,12 +31,11 @@ interface Draft {
   fenceHeightNote: string;
 }
 
-const toMm = (um: number) => String(um / 1000);
 
 function toDraft(s: Settings): Draft {
   return {
-    lengths: Object.fromEntries(LENGTH_FIELDS.map((f) => [f, toMm(s[f])])) as Record<LengthField, string>,
-    trimBySheet: Object.fromEntries(Object.entries(s.edgeTrimBySheet).map(([id, um]) => [id, toMm(um)])),
+    lengths: Object.fromEntries(LENGTH_FIELDS.map((f) => [f, mmExact(s[f])])) as Record<LengthField, string>,
+    trimBySheet: Object.fromEntries(Object.entries(s.edgeTrimBySheet).map(([id, um]) => [id, mmExact(um)])),
     manualBottomOpKinds: s.manualBottomOpKinds,
     fenceHeightNote: s.fenceHeightNote,
   };
@@ -45,7 +45,7 @@ function toDraft(s: Settings): Draft {
 function parseMm(text: string): number | null {
   if (text.trim() === '') return null;
   const mm = Number(text);
-  return Number.isFinite(mm) && mm >= 0 ? Math.round(mm * 1000) : null;
+  return Number.isFinite(mm) && mm >= 0 ? fromMm(mm) : null;
 }
 
 function fromDraft(d: Draft): { settings: Settings; errors: string[] } {

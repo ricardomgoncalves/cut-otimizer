@@ -1,6 +1,7 @@
 import { sideBFileName } from '../core/dxf/index.ts';
 import type { CncOp, Point } from '../core/model.ts';
 import { sideBPoint, type Edge, type JobManualOp, type SideBFile } from '../core/planner/index.ts';
+import { mmExact, toMm as mm } from '../core/units.ts';
 
 const OPPOSITE: Record<Edge, Edge> = { x0: 'xL', xL: 'x0', y0: 'yW', yW: 'y0' };
 
@@ -31,8 +32,8 @@ export function SideBView({ files, job, nameOf, whereOf, onDownload, onDone, don
       {files.map((file) => (
         <figure key={file.id}>
           <figcaption>
-            <strong>{file.id}</strong> · <code>{sideBFileName(job, file)}</code> · {file.cutLength / 1000} ×{' '}
-            {file.cutWidth / 1000} mm · {file.partIds.length} Part(s){' '}
+            <strong>{file.id}</strong> · <code>{sideBFileName(job, file)}</code> · {mmExact(file.cutLength)} ×{' '}
+            {mmExact(file.cutWidth)} mm · {file.partIds.length} Part(s){' '}
             <button
               type="button"
               onClick={() => {
@@ -80,7 +81,6 @@ export function SideBView({ files, job, nameOf, whereOf, onDownload, onDone, don
  * the bottom edge, the short fence up the left edge, every edge named.
  */
 function SideBDrawing({ file }: { file: SideBFile }) {
-  const mm = (um: number) => um / 1000;
   const L = mm(file.length);
   const W = mm(file.width);
   const pad = Math.max(40, Math.max(L, W) * 0.08);

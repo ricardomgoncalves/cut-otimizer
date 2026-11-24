@@ -1,10 +1,7 @@
-// Number formats for printed documents. Lengths in µm in, mm text out.
+// Number formats for printed documents. Lengths in µm in, mm text out (0.1 mm on paper).
+import { mmText } from '../units.ts';
 
-/** µm -> mm rounded to 0.1 mm, no trailing zero (`596800` -> `596.8`, `600000` -> `600`). */
-export function mmText(um: number): string {
-  const tenths = Math.round(um / 100);
-  return String(tenths / 10);
-}
+export { mmText };
 
 /** `length × width` in mm. */
 export function sizeText(length: number, width: number): string {

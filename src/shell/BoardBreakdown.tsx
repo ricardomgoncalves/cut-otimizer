@@ -1,4 +1,5 @@
 import type { Board } from '../core/planner/index.ts';
+import { mmText, toMm as mm } from '../core/units.ts';
 
 interface Props {
   code: string;
@@ -9,8 +10,6 @@ interface Props {
   onDiscard: (offcutId: string, discarded: boolean) => void;
 }
 
-const mm = (um: number) => um / 1000;
-const fmt = (um: number) => String(Math.round(um / 100) / 10);
 
 /**
  * One Board's Breakdown: Blanks, Saw Parts and Offcuts, with the rips (`1, 2…`) and crosscuts
@@ -51,7 +50,7 @@ export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
   return (
     <figure className="breakdown">
       <figcaption>
-        <strong>{name}</strong> · {fmt(board.length)} × {fmt(board.width)} mm
+        <strong>{name}</strong> · {mmText(board.length)} × {mmText(board.width)} mm
       </figcaption>
       <svg
         viewBox={`0 0 ${String(L)} ${String(W)}`}
@@ -67,7 +66,7 @@ export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
         </defs>
         <rect x={0} y={0} width={L} height={W} fill={`url(#${hatch})`} stroke="var(--ref)" strokeWidth={4} />
         {board.offcuts.map((o, i) => {
-          const size = `${fmt(o.length)} × ${fmt(o.width)}`;
+          const size = `${mmText(o.length)} × ${mmText(o.width)}`;
           const keep = o.kept && !o.discarded && !o.used;
           const classes = ['offcut', o.kept ? 'kept' : '', o.discarded ? 'discarded' : '', o.used ? 'used' : ''];
           const note = o.used ? ' (cut up for new Blanks)' : o.discarded ? ' (discarded)' : o.kept ? ' (keep)' : '';
@@ -91,7 +90,7 @@ export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
         })}
         {board.blanks.map((b) => (
           <g key={b.id} className="blank">
-            <title>{`${b.id} ${fmt(b.length)} × ${fmt(b.width)}`}</title>
+            <title>{`${b.id} ${mmText(b.length)} × ${mmText(b.width)}`}</title>
             <rect
               x={mm(b.x)}
               y={flipY(mm(b.y), mm(b.width))}
@@ -106,7 +105,7 @@ export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
         ))}
         {board.sawParts.map((p) => (
           <g key={p.partId} className="saw-part">
-            <title>{`Saw Part ${nameOf(p.partId)} ${fmt(p.length)} × ${fmt(p.width)}`}</title>
+            <title>{`Saw Part ${nameOf(p.partId)} ${mmText(p.length)} × ${mmText(p.width)}`}</title>
             <rect
               x={mm(p.x)}
               y={flipY(mm(p.y), mm(p.width))}
@@ -159,8 +158,8 @@ export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
                 {c.kind === 'rip' ? 'rip' : 'crosscut'}
                 {c.from && ` from ${c.from}`}
               </td>
-              <td>{c.kind === 'rip' ? `y ${fmt(c.y)}` : `x ${fmt(c.x)}`}</td>
-              <td>{fmt(c.length)}</td>
+              <td>{c.kind === 'rip' ? `y ${mmText(c.y)}` : `x ${mmText(c.x)}`}</td>
+              <td>{mmText(c.length)}</td>
             </tr>
           ))}
         </tbody>
@@ -180,7 +179,7 @@ export function BoardBreakdown({ code, board, nameOf, onDiscard }: Props) {
                 />{' '}
                 Discard {o.id}{' '}
                 <span className="tally">
-                  ({fmt(o.length)} × {fmt(o.width)})
+                  ({mmText(o.length)} × {mmText(o.width)})
                 </span>{' '}
               </label>
             ) : null,

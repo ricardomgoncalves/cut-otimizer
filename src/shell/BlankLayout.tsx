@@ -1,4 +1,5 @@
 import type { Blank } from '../core/planner/index.ts';
+import { toMm as mm } from '../core/units.ts';
 
 interface Props {
   blank: Blank;
@@ -13,7 +14,6 @@ interface Props {
 
 /** A plain SVG of one Blank's Layout: front edge at the bottom, X to the right, in mm. */
 export function BlankLayout({ blank, clampMargin, nameOf, sideBOf, voidOf }: Props) {
-  const mm = (um: number) => um / 1000;
   const L = mm(blank.length);
   const W = mm(blank.width);
   const c = mm(clampMargin);

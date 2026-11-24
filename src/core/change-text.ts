@@ -2,12 +2,11 @@
 // describing what changed, so it shows on its label and the cut sheet. The text says what to do to the
 // piece in hand: "now 596 wide", "hole Ø5 added at 32, 96". Sizes are cut sizes and op positions are in the
 // Part's cut frame (like Side A), in mm.
+import { mmText } from './units.ts';
 import type { CncOp, Model, Part, Point } from './model.ts';
 
-/** µm -> mm, at most 2 decimals, no trailing zeros. */
-function mm(um: number): string {
-  return String(Math.round(um / 10) / 100);
-}
+/** µm -> mm, at most 2 decimals, no trailing zeros (`21500` -> `21.5`). */
+const mm = (um: number) => mmText(um, 2);
 
 const at = (p: Point) => `${mm(p.x)}, ${mm(p.y)}`;
 

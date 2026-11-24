@@ -1,11 +1,10 @@
 // Manual ops spelled out for people: the PDF, the label and the Job's Manual ops list read this text.
+import { mmText } from './units.ts';
 import type { CncOp, Face, ManualOp } from './model.ts';
 import type { Op as ExportOp } from './import/parts-export.v1.generated.ts';
 
 /** µm -> mm, at most 2 decimals, no trailing zeros (`21500` -> `21.5`). */
-function mm(um: number): string {
-  return String(Math.round(um / 10) / 100);
-}
+const mm = (um: number) => mmText(um, 2);
 
 /** `x 10, y 20`: only the axes the point has, in x, y, z order. */
 function at(p: Partial<Record<'x' | 'y' | 'z', number>>): string {

@@ -5,7 +5,7 @@
 // Output is a pure function of the Plan, so the same Plan gives byte-identical files.
 import type { CncOp, Point } from '../model.ts';
 import { sideBPoint, type Blank, type Placement, type Plan, type SideBFile } from '../planner/index.ts';
-import { mmToken } from '../units.ts';
+import { mmText, mmToken } from '../units.ts';
 
 /**
  * File name -> DXF text, in Run order: Side A per Blank (Sheets, Boards, Blanks), then Side B per Side B
@@ -194,10 +194,7 @@ function opEntity(op: CncOp, part: PartFrame): Entity | null {
 // --- R12 serialisation -------------------------------------------------------------------------
 
 /** µm -> mm text: exact to 0.1 µm, no trailing zeros (`55750` -> `55.75`). */
-function num(um: number): string {
-  const s = (um / 1000).toFixed(4).replace(/\.?0+$/, '');
-  return s === '-0' ? '0' : s;
-}
+const num = (um: number) => mmText(um, 4);
 
 function writeDxf(layers: string[], entities: Entity[]): string {
   const out: string[] = [];

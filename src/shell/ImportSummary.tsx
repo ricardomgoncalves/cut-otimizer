@@ -1,10 +1,10 @@
 import type { ImportIssue } from '../core/import/index.ts';
 import type { Model } from '../core/model.ts';
+import { mmExact as mm } from '../core/units.ts';
 import { PartDetail } from './PartDetail.tsx';
 
 type Issue<K extends ImportIssue['kind']> = Extract<ImportIssue, { kind: K }>;
 
-const mm = (um: number) => String(um / 1000);
 
 const SKIP_REASON: Record<Issue<'skipped'>['reason'], string> = {
   invalid: 'invalid',

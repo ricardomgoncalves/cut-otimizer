@@ -51,6 +51,7 @@ import {
 } from '../core/progress.ts';
 import { applyReimport, diff, revertReimport, voidText, type Unpair } from '../core/reimport.ts';
 import type { Settings } from '../core/settings.ts';
+import { mmExact } from '../core/units.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
 import { CutSheetPanel } from './CutSheetPanel.tsx';
@@ -898,7 +899,7 @@ export function App() {
                 board.blanks.map((blank) => (
                   <figure key={blank.id}>
                     <figcaption>
-                      <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
+                      <strong>{blank.id}</strong> · {mmExact(blank.length)} × {mmExact(blank.width)} mm ·{' '}
                       {blank.from && <>from kept Offcut {blank.from} · </>}
                       {blankRoll.get(blank.id)?.total ?? blank.parts.length} Part(s){' '}
                       <button
@@ -926,7 +927,7 @@ export function App() {
                     <ol>
                       {blank.parts.map((p) => {
                         const part = partById.get(p.partId);
-                        const size = `${String(p.cutLength / 1000)} × ${String(p.cutWidth / 1000)}${p.rotated ? ' (turned)' : ''}`;
+                        const size = `${mmExact(p.cutLength)} × ${mmExact(p.cutWidth)}${p.rotated ? ' (turned)' : ''}`;
                         return (
                           <li key={p.partId} value={p.n}>
                             {part ? (
@@ -1119,7 +1120,7 @@ function PartList(props: {
               <tr key={p.id}>
                 <td>{p.displayName}</td>
                 <td>
-                  {p.cutLength / 1000} × {p.cutWidth / 1000}
+                  {mmExact(p.cutLength)} × {mmExact(p.cutWidth)}
                 </td>
                 <td>
                   {props.overflow.includes(p.id) ? (

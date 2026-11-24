@@ -1,5 +1,6 @@
 import type { ReimportLogEntry, Spare } from '../core/job-store/document.ts';
 import { CATEGORIES, clearedSteps, type Category, type Change, type Diff, type DiffEntry } from '../core/reimport.ts';
+import { mmExact } from '../core/units.ts';
 import { STEP_LABELS } from './step-labels.ts';
 
 const CATEGORY_LABELS: Record<Category, string> = {
@@ -229,7 +230,7 @@ export function SparesList(props: { spares: Spare[]; onDismiss: (partId: string)
             <tr key={s.partId}>
               <td>{s.displayName}</td>
               <td>
-                {s.cutLength / 1000} × {s.cutWidth / 1000} × {s.thickness / 1000}
+                {mmExact(s.cutLength)} × {mmExact(s.cutWidth)} × {mmExact(s.thickness)}
               </td>
               <td>{s.where ?? '—'}</td>
               <td>
