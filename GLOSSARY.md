@@ -76,3 +76,11 @@ _Avoid_: profile, config
 
 **Locked**:
 Describes a Board or Blank that has at least one Part ticked Cut. Regenerating Layouts leaves locked Boards and Blanks as they are.
+
+**Manual op**:
+An op the CNC does not run: an edge-face op, a `bottom` op kind set to manual in Machine settings, or an op that can't be drawn as a hole or rectangle (a mitre, for example). It is printed on the cut sheet and the Part's label instead of going into a file for CAM.
+_Avoid_: hand op, skipped op
+
+**Reference layer**:
+A layer in a file for CAM that is drawn only for orientation and checking (the Blank's edge, the clamp margin, a Flip Part's outline) and is never cut.
+_Avoid_: guide layer, construction layer
