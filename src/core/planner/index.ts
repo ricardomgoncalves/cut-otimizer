@@ -19,6 +19,11 @@
 //   front row left to right, then the next row back (sort by y, then x).
 // - Blanks are never rotated: Board length runs along X. Only `grain: none` Parts may rotate.
 // - Only `top` ops go to Side A. Flip Parts, Side B files and Manual ops: side-b.ts (#28).
+// - Locked Boards (#36; PRD 3.7, 5.5): a Board of `prior.plan` with any Part ticked Cut (`prior.cut`) is
+//   kept exactly as it is (geometry, number, Blank ids, `#n`, its Saw Parts with their reasons), with every
+//   Part on it. Only the other Parts are planned, onto new Boards numbered after the highest Locked Board,
+//   so new Blanks never reuse a Locked id and sort to the end of their Sheet. Each Blank records the clamp
+//   margin it was nested with, so a Locked Blank's DXF doesn't change when the margin does.
 import { MaxRectsBin, PACKING_LOGIC, Rectangle } from 'maxrects-packer';
 import type { CncOp, Model, Part, Sheet } from '../model.ts';
 import { edgeTrimFor, type Settings } from '../settings.ts';
@@ -53,6 +58,11 @@ export interface Blank {
   y: number;
   length: number;
   width: number;
+  /**
+   * The clamp margin its Parts were nested inside. The Planner always sets it, so a Locked Blank kept
+   * from an earlier Plan keeps its own margin; a hand-written Blank without it uses `plan.settings`.
+   */
+  clampMargin?: number;
   /** In `#n` order. */
   parts: Placement[];
 }
@@ -134,10 +144,17 @@ export interface Plan {
 
 export type PartMode = 'saw' | 'cnc';
 
-/** What the Planner keeps from earlier: the Job's choices. */
+/** What the Planner keeps from earlier: the Job's choices, the stored Plan and what is already cut. */
 export interface PlanPrior {
-  /** Per-Part Saw / CNC toggle, by Part id. Ignored for Parts bigger than the usable bed. */
+  /** Per-Part Saw / CNC toggle, by Part id. Ignored for Parts bigger than the usable bed and for Locked Parts. */
   sawCnc?: Record<string, PartMode>;
+  /** The stored Plan. Its Locked Boards are kept exactly as they are. */
+  plan?: Plan;
+  /**
+   * Part ids ticked Cut. A Board of `plan` with any of them on it (on a Blank or as a Saw Part) is
+   * **Locked**: kept with its geometry, Board number, Blank ids and `#n`, and with every Part on it.
+   */
+  cut?: readonly string[];
 }
 
 /** How a Part is cut without any toggle, and whether the toggle applies. */
@@ -153,16 +170,37 @@ export interface PartRule {
 
 /** Plans every Sheet of the model. Pure and deterministic. */
 export function plan(model: Model, settings: Settings, prior: PlanPrior = {}): Plan {
+  const locked = lockedBoards(prior);
   const sheets = runOrder(model.sheets).map((sheet) =>
     planSheet(
       sheet,
       model.parts.filter((p) => p.sheetId === sheet.id),
       settings,
       prior.sawCnc ?? {},
+      locked.get(sheet.id) ?? [],
     ),
   );
   const { files, manualOps } = sideB(model, settings, partRunOrder(sheets));
   return { settings, sheets, sideB: files, manualOps };
+}
+
+/** The Locked Boards of the prior Plan, by Sheet id, in Board-number order. */
+function lockedBoards(prior: PlanPrior): Map<string, Board[]> {
+  const cut = new Set(prior.cut ?? []);
+  const out = new Map<string, Board[]>();
+  if (cut.size === 0) return out;
+  for (const sheet of prior.plan?.sheets ?? []) {
+    const boards = sheet.boards
+      .filter((b) => boardPartIds(b).some((id) => cut.has(id)))
+      .sort((a, b) => a.number - b.number);
+    if (boards.length > 0) out.set(sheet.sheetId, boards);
+  }
+  return out;
+}
+
+/** Every Part cut from a Board: its Blanks' Parts, then its Saw Parts. */
+function boardPartIds(board: Board): string[] {
+  return [...board.blanks.flatMap((b) => b.parts.map((p) => p.partId)), ...board.sawParts.map((p) => p.partId)];
 }
 
 /**
@@ -240,10 +278,22 @@ function planSheet(
   parts: Part[],
   settings: Settings,
   sawCnc: Record<string, PartMode>,
+  locked: Board[],
 ): SheetPlan {
+  // Parts on a Locked Board stay where they are; a Locked Saw Part keeps its reason.
+  const lockedSaw = new Map(locked.flatMap((b) => b.sawParts.map((p) => [p.partId, p.reason] as const)));
+  const lockedIds = new Set(locked.flatMap(boardPartIds));
   const cnc: Part[] = [];
   const saw: SawItem[] = [];
+  const sawReasons: Record<string, SawReason> = {};
+  const sawParts: string[] = [];
   for (const part of parts) {
+    const keptReason = lockedSaw.get(part.id);
+    if (keptReason) {
+      sawParts.push(part.id);
+      sawReasons[part.id] = keptReason;
+    }
+    if (lockedIds.has(part.id)) continue;
     const rule = ruleFor(part, sheet, settings);
     const choice = sawCnc[part.id];
     if (rule.oversize) saw.push({ part, reason: 'oversize' });
@@ -251,6 +301,11 @@ function planSheet(
     else if (choice === 'saw') saw.push({ part, reason: rule.auto === 'saw' ? 'narrow' : 'chosen' });
     else if (rule.auto === 'saw') saw.push({ part, reason: 'narrow' });
     else cnc.push(part);
+    const item = saw[saw.length - 1];
+    if (item?.part === part) {
+      sawParts.push(part.id);
+      sawReasons[part.id] = item.reason;
+    }
   }
 
   const area = trimmedArea(sheet, settings);
@@ -266,12 +321,14 @@ function planSheet(
   };
   let remainingCnc = nestingOrder(cnc);
   let remainingSaw = sawOrder(saw.filter((s) => fitsBoard(s.part)));
-  const boards: Board[] = [];
+  const boards: Board[] = [...locked];
+  // New Boards take the next free numbers, after every Locked Board, so they sort last in the Sheet.
+  let number = Math.max(0, ...locked.map((b) => b.number));
 
   while (remainingCnc.length > 0 || remainingSaw.length > 0) {
     const draft = bestBoard(ctx, remainingCnc, remainingSaw);
     if (!draft) break; // Cannot happen: every remaining Part fits an empty Board.
-    const board = finishBoard(ctx, draft, boards.length + 1);
+    const board = finishBoard(ctx, draft, ++number);
     boards.push(board);
     const used = new Set(draftPartIds(draft));
     remainingCnc = remainingCnc.filter((p) => !used.has(p.id));
@@ -283,8 +340,8 @@ function planSheet(
     code: sheet.code,
     thickness: sheet.thickness,
     boards,
-    sawParts: saw.map((s) => s.part.id),
-    sawReasons: Object.fromEntries(saw.map((s) => [s.part.id, s.reason])),
+    sawParts,
+    sawReasons,
     unplaced,
   };
 }
@@ -523,6 +580,7 @@ function finishBoard(ctx: Ctx, draft: DraftBoard, number: number): Board {
         y: strip.y,
         length: piece.length,
         width: strip.width,
+        clampMargin: ctx.settings.clampMargin,
         parts,
       });
     });

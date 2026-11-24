@@ -16,7 +16,7 @@ export function toDxfFiles(plan: Plan, job: string): Map<string, string> {
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
       for (const blank of board.blanks) {
-        files.set(`${blank.id}.side-a.dxf`, sideA(blank, plan.settings.clampMargin));
+        files.set(`${blank.id}.side-a.dxf`, sideA(blank, blank.clampMargin ?? plan.settings.clampMargin));
       }
     }
   }

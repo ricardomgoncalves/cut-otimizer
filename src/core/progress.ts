@@ -206,6 +206,40 @@ export function wouldUnlock(job: JobView, progress: Progress, partId: string, st
   return out;
 }
 
+/** What to print again after a regenerate: everything that isn't Locked or Done. Ids in Run order. */
+export interface ReprintSelection {
+  /** Board ids (`W18-1`) of unlocked Boards: their saw pages. */
+  boards: string[];
+  /** Ids of unlocked Blanks: their Side A pages and DXFs. */
+  blanks: string[];
+  /** Parts not on a Locked Board and not Done (incl. Saw Parts on no Board): their labels and rows. */
+  parts: string[];
+  /** Side B files holding any of those Parts. */
+  sideB: string[];
+}
+
+/**
+ * The PDF pages and labels a regenerate needs reprinted: Locked Boards and Blanks are unchanged by a
+ * regenerate, so their paper (and the labels of the Parts on them) is still good.
+ */
+export function reprintSelection(job: JobView, progress: Progress): ReprintSelection {
+  const out: ReprintSelection = { boards: [], blanks: [], parts: [], sideB: [] };
+  const keep = (ids: readonly string[]) => ids.filter((id) => !isDone(job, progress, id));
+  for (const sheet of job.plan.sheets) {
+    for (const board of sheet.boards) {
+      const ids = boardParts(board);
+      if (ids.some((id) => isCut(progress, id))) continue;
+      out.boards.push(boardId(sheet, board));
+      out.blanks.push(...board.blanks.map((b) => b.id));
+      out.parts.push(...keep(ids));
+    }
+    out.parts.push(...keep(sheet.unplaced));
+  }
+  const parts = new Set(out.parts);
+  out.sideB = job.plan.sideB.filter((f) => f.partIds.some((id) => parts.has(id))).map((f) => f.id);
+  return out;
+}
+
 /** The Steps that apply to a Part, in Step order. Empty for a Part that isn't in the Job. */
 export function steps(job: JobView, partId: string): Step[] {
   const part = job.model.parts.find((p) => p.id === partId);

@@ -282,13 +282,13 @@ export function App() {
 
   function onRegenerate() {
     if (!open?.job) return;
-    const job = regenerate(open.job, settings);
+    const job = regenerate(open.job, settings, open.doc.progress);
     save(withJob(open.doc, job, now()), open.model, job);
   }
 
   function onSheetCode(sheetId: string, code: string) {
     if (!open?.job) return;
-    const result = setSheetCode(open.job, sheetId, code);
+    const result = setSheetCode(open.job, sheetId, code, open.doc.progress);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -299,7 +299,7 @@ export function App() {
 
   function onPartMode(partId: string, mode: PartMode) {
     if (!open?.job) return;
-    const result = setPartMode(open.job, partId, mode);
+    const result = setPartMode(open.job, partId, mode, open.doc.progress);
     if ('error' in result) {
       setCodeError(result.error);
       return;
@@ -474,6 +474,8 @@ export function App() {
                 This Job was generated with different Machine settings (
                 {changed.map((k) => SETTING_LABELS[k]).join(', ')}). Its files keep the old settings until
                 you regenerate it.
+                {rolled?.boards.some((b) => b.locked) &&
+                  ' Locked Boards and Blanks (with a Part ticked Cut) stay exactly as they are; only the rest is planned again.'}
               </p>
               <button type="button" onClick={onRegenerate}>
                 Regenerate
@@ -571,10 +573,11 @@ export function App() {
                         {blankRoll.get(blank.id)?.cut ?? 0} / {blank.parts.length} Cut ·{' '}
                         {blankRoll.get(blank.id)?.done ?? 0} / {blank.parts.length} Done
                       </span>
+                      {blankRoll.get(blank.id)?.locked && <span className="locked"> · Locked</span>}
                     </figcaption>
                     <BlankLayout
                       blank={blank}
-                      clampMargin={job.plan.settings.clampMargin}
+                      clampMargin={blank.clampMargin ?? job.plan.settings.clampMargin}
                       nameOf={nameOf}
                       sideBOf={sideBOf}
                     />

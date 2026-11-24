@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
 import type { Model, Part } from '../src/core/model.ts';
-import { partRule, plan, type Blank, type Plan } from '../src/core/planner/index.ts';
+import { partRule, plan, type Blank, type Board, type Plan } from '../src/core/planner/index.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
 
 function syntheticModel(): Model {
@@ -39,8 +39,12 @@ const footprints = (blank: Blank): (Rect & { partId: string })[] =>
 const allBlanks = (result: Plan) => result.sheets.flatMap((s) => s.boards.flatMap((b) => b.blanks));
 
 /** The Planner invariants every Plan must hold. */
-function expectInvariants(model: Model, result: Plan, settings: Settings) {
-  const clamp = settings.clampMargin;
+function expectInvariants(
+  model: Model,
+  result: Plan,
+  planSettings: Settings,
+  locked?: { settings: Settings; boards: Set<string> },
+) {
 
   // Every Part placed exactly once, as a CNC Part or a Saw Part.
   const placed = [
@@ -66,6 +70,9 @@ function expectInvariants(model: Model, result: Plan, settings: Settings) {
 
   for (const sheet of result.sheets) {
     for (const board of sheet.boards) {
+      // A Locked Board was planned with the earlier settings and is kept as it was.
+      const settings = locked?.boards.has(`${sheet.sheetId}/${String(board.number)}`) ? locked.settings : planSettings;
+      const clamp = settings.clampMargin;
       const trim = settings.edgeTrimBySheet[sheet.sheetId] ?? settings.edgeTrim;
       // Blanks within the bed; every saw piece within the trimmed Board, with kerf between saw pieces.
       for (const blank of board.blanks) {
@@ -116,14 +123,22 @@ function expectInvariants(model: Model, result: Plan, settings: Settings) {
 }
 
 /** The Run order rules every Plan must hold. */
-function expectRunOrder(model: Model, result: Plan) {
+function expectRunOrder(model: Model, result: Plan, locked = new Set<string>()) {
   // Sheets grouped by thickness; groups and Sheets within them in export order.
   const thicknesses = [...new Set(model.sheets.map((s) => s.thickness))];
   const expected = thicknesses.flatMap((t) => model.sheets.filter((s) => s.thickness === t).map((s) => s.id));
   expect(result.sheets.map((s) => s.sheetId)).toEqual(expected);
 
   for (const sheet of result.sheets) {
-    expect(sheet.boards.map((b) => b.number)).toEqual(sheet.boards.map((_, i) => i + 1));
+    // Locked Boards keep their numbers and come first; new Boards take the next free numbers after them.
+    const isLocked = (n: number) => locked.has(`${sheet.sheetId}/${String(n)}`);
+    const numbers = sheet.boards.map((b) => b.number);
+    const lockedNumbers = numbers.filter(isLocked);
+    const last = Math.max(0, ...lockedNumbers);
+    expect(numbers).toEqual([
+      ...[...lockedNumbers].sort((a, b) => a - b),
+      ...numbers.filter((n) => !isLocked(n)).map((_, i) => last + i + 1),
+    ]);
     for (const board of sheet.boards) {
       // Letters A, B, ... in saw order: strip by strip from the front, left to right in a strip.
       expect(board.blanks.map((b) => b.id)).toEqual(
@@ -418,6 +433,107 @@ describe('plan', () => {
       [1496800, 380000, false],
       [2800000, 1686800, true],
     ]);
+  });
+});
+
+describe('Locked Boards and Blanks', () => {
+  const changed: Settings = {
+    ...DEFAULT_SETTINGS,
+    clampMargin: 55000,
+    bitDiameter: 8000,
+    sawKerf: 4000,
+    edgeTrim: 10000,
+    minCncWidth: 70000,
+    bedLength: 1250000,
+  };
+
+  const boardParts = (b: Board) => [...b.blanks.flatMap((x) => x.parts.map((p) => p.partId)), ...b.sawParts.map((p) => p.partId)];
+
+  /** Ticks Cut on a seeded sample of the Parts on Boards. */
+  function tickSome(result: Plan, seed: number): string[] {
+    const random = rng(seed * 31);
+    return result.sheets.flatMap((s) => s.boards.flatMap(boardParts)).filter(() => random() < 0.15);
+  }
+
+  const lockedBoards = (result: Plan, cut: readonly string[]) =>
+    result.sheets.flatMap((sheet) =>
+      sheet.boards
+        .filter((b) => boardParts(b).some((id) => cut.includes(id)))
+        .map((board) => ({ sheetId: sheet.sheetId, board })),
+    );
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])(
+    'keeps every Locked Board and Blank unchanged after regenerating with changed settings (random export %i)',
+    (seed) => {
+      const model = randomModel(seed, 40);
+      const before = plan(model, DEFAULT_SETTINGS);
+      const cut = tickSome(before, seed);
+      const locked = lockedBoards(before, cut);
+      const after = plan(model, changed, { plan: before, cut });
+
+      for (const { sheetId, board } of locked) {
+        const kept = after.sheets.find((s) => s.sheetId === sheetId)?.boards.find((b) => b.number === board.number);
+        expect(kept).toEqual(board);
+      }
+      const lockedKeys = new Set(locked.map((l) => `${l.sheetId}/${String(l.board.number)}`));
+      expectInvariants(model, after, changed, { settings: DEFAULT_SETTINGS, boards: lockedKeys });
+      expectRunOrder(model, after, lockedKeys);
+    },
+  );
+
+  it('gives new Boards the next free numbers, so new Blanks never reuse a Locked id and sort last', () => {
+    const model = randomModel(5, 60);
+    const before = plan(model, DEFAULT_SETTINGS);
+    const first = before.sheets[0]?.boards[0];
+    const partId = first?.blanks[0]?.parts[0]?.partId;
+    if (!first || !partId) throw new Error('needs a W18 Blank');
+    const after = plan(model, changed, { plan: before, cut: [partId] });
+    const sheet = after.sheets[0];
+
+    expect(sheet?.boards[0]).toEqual(first);
+    const lockedIds = new Set(first.blanks.map((b) => b.id));
+    const newBoards = sheet?.boards.slice(1) ?? [];
+    expect(newBoards.length).toBeGreaterThan(0);
+    for (const board of newBoards) {
+      expect(board.number).toBeGreaterThan(first.number);
+      for (const blank of board.blanks) expect(lockedIds.has(blank.id), blank.id).toBe(false);
+    }
+  });
+
+  it('numbers new Boards after the highest Locked Board, even when an earlier Board is unlocked', () => {
+    const model = randomModel(5, 60);
+    const before = plan(model, DEFAULT_SETTINGS);
+    const second = before.sheets[0]?.boards[1];
+    const partId = second ? boardParts(second)[0] : undefined;
+    if (!second || !partId) throw new Error('needs two W18 Boards');
+    const sheet = plan(model, DEFAULT_SETTINGS, { plan: before, cut: [partId] }).sheets[0];
+
+    expect(sheet?.boards[0]).toEqual(second);
+    expect(sheet?.boards.slice(1).map((b) => b.number)).toEqual(
+      sheet?.boards.slice(1).map((_, i) => second.number + i + 1),
+    );
+  });
+
+  it('plans from scratch when nothing is ticked Cut', () => {
+    const model = randomModel(3, 40);
+    const before = plan(model, DEFAULT_SETTINGS);
+    expect(plan(model, changed, { plan: before, cut: [] })).toEqual(plan(model, changed));
+  });
+
+  it('keeps a Locked Saw Part where it is, with its reason, and re-plans the other Sheet', () => {
+    const model = syntheticModel();
+    const before = plan(model, DEFAULT_SETTINGS);
+    const after = plan(model, changed, { plan: before, cut: ['c1/leftSide'], sawCnc: { 'c1/s0.rail[1]': 'cnc' } });
+
+    expect(after.sheets[0]?.boards).toEqual(before.sheets[0]?.boards);
+    expect(after.sheets[0]?.sawParts).toEqual(before.sheets[0]?.sawParts);
+    expect(after.sheets[0]?.sawReasons).toEqual(before.sheets[0]?.sawReasons);
+    expect(after.sheets[1]?.boards[0]).not.toEqual(before.sheets[1]?.boards[0]);
+  });
+
+  it('records the clamp margin each Blank was nested with', () => {
+    const result = plan(syntheticModel(), changed);
+    expect(allBlanks(result).map((b) => b.clampMargin)).toEqual([55000, 55000]);
   });
 });
 
