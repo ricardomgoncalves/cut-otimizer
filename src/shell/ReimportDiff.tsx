@@ -1,5 +1,6 @@
-import type { ReimportLogEntry } from '../core/job-store/document.ts';
-import { CATEGORIES, type Category, type Change, type Diff, type DiffEntry } from '../core/reimport.ts';
+import type { ReimportLogEntry, Spare } from '../core/job-store/document.ts';
+import { CATEGORIES, clearedSteps, type Category, type Change, type Diff, type DiffEntry } from '../core/reimport.ts';
+import { STEP_LABELS } from './step-labels.ts';
 
 const CATEGORY_LABELS: Record<Category, string> = {
   changedCut: 'Changed (cut)',
@@ -23,6 +24,26 @@ const CHANGE_LABELS: Record<Change, string> = {
   manualOps: 'Manual ops',
 };
 
+/** What applying does to a Part's work, in words. */
+function treatmentText(e: DiffEntry): string {
+  switch (e.treatment) {
+    case 'remake':
+      return 'Already cut: Remake (ticks cleared, nested again)';
+    case 'fixByHand':
+      return `Already cut: fix by hand (${e.fixText ?? 'changed'})`;
+    case 'nest':
+      return 'Not cut yet: nested again';
+    case 'clearSteps':
+      return `Clears ${clearedSteps(e.changes).map((s) => STEP_LABELS[s]).join(' and ')}`;
+    case 'spare':
+      return 'Already cut: becomes a Spare';
+    case 'drop':
+      return 'Not cut: dropped';
+    default:
+      return '';
+  }
+}
+
 const percent = (share: number) => `${String(Math.round(share * 100))}%`;
 const day = (iso: string | undefined) => (iso === undefined ? 'unknown' : iso.replace('T', ' ').slice(0, 16));
 
@@ -34,6 +55,8 @@ export function ReimportDiff(props: {
   fileName: string;
   diff: Diff;
   onUnpair: (entry: DiffEntry) => void;
+  /** Ticks or unticks "Fix by hand" on a Changed (cut) Part already cut. */
+  onFixByHand: (entry: DiffEntry, fix: boolean) => void;
   onApply: () => void;
   onCancel: () => void;
 }) {
@@ -80,6 +103,7 @@ export function ReimportDiff(props: {
                 <th scope="col">Was</th>
                 <th scope="col">Where</th>
                 <th scope="col">Changes</th>
+                <th scope="col">Work done</th>
                 <th scope="col" />
               </tr>
             </thead>
@@ -99,6 +123,28 @@ export function ReimportDiff(props: {
                     </td>
                     <td>{e.where}</td>
                     <td>{e.changes.map((k) => CHANGE_LABELS[k]).join(', ')}</td>
+                    <td>
+                      {treatmentText(e)}
+                      {(e.treatment === 'remake' || e.treatment === 'fixByHand') && (
+                        <label>
+                          {' '}
+                          <input
+                            type="checkbox"
+                            checked={e.treatment === 'fixByHand'}
+                            onChange={(ev) => {
+                              props.onFixByHand(e, ev.target.checked);
+                            }}
+                          />{' '}
+                          Fix by hand {e.displayName}
+                        </label>
+                      )}
+                      {(e.flags ?? []).map((f) => (
+                        <strong key={f} className="warn">
+                          {' '}
+                          {f}
+                        </strong>
+                      ))}
+                    </td>
                     <td>
                       {e.paired && (
                         <button
@@ -159,5 +205,47 @@ export function ReimportLog({ log }: { log: ReimportLogEntry[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** Spares: cut Parts a re-import removed, with where to find them, until dismissed. */
+export function SparesList(props: { spares: Spare[]; onDismiss: (partId: string) => void }) {
+  if (props.spares.length === 0) return null;
+  return (
+    <section aria-label="Spares" className="warning-box">
+      <h3>Spares</h3>
+      <p>Cut Parts no longer in the export: set them aside. They count in no progress.</p>
+      <table aria-label="Spares">
+        <thead>
+          <tr>
+            <th scope="col">Spare (old name)</th>
+            <th scope="col">Cut size (mm)</th>
+            <th scope="col">Was cut at</th>
+            <th scope="col" />
+          </tr>
+        </thead>
+        <tbody>
+          {props.spares.map((s) => (
+            <tr key={s.partId}>
+              <td>{s.displayName}</td>
+              <td>
+                {s.cutLength / 1000} × {s.cutWidth / 1000} × {s.thickness / 1000}
+              </td>
+              <td>{s.where ?? '—'}</td>
+              <td>
+                <button
+                  type="button"
+                  onClick={() => {
+                    props.onDismiss(s.partId);
+                  }}
+                >
+                  Dismiss {s.displayName}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

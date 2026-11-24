@@ -188,6 +188,8 @@ describe('Fix by hand', () => {
   it('keeps the ticks and adds an unticked Manual ops Step that describes the change', () => {
     const doc = documentWith(cut(SHELF), tick(SHELF, 'banded'), tick(SHELF, 'manualOps'));
     const file = exportWith(narrower(SHELF));
+    // The diff shows what Fix by hand would say, whichever is chosen.
+    expect(diffOf(doc, file).entries[0]).toMatchObject({ newId: SHELF, treatment: 'remake', fixText: 'now 517 wide' });
     expect(diffOf(doc, file, { fixByHand: [SHELF] }).entries[0]).toMatchObject({ newId: SHELF, treatment: 'fixByHand' });
 
     const after = reimport(doc, file, { fixByHand: [SHELF] });

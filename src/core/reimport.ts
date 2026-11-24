@@ -78,6 +78,8 @@ export interface DiffEntry {
    * ("banding changed after it was banded").
    */
   flags?: string[];
+  /** Changed (cut) Parts already cut: what "Fix by hand" adds as a Manual op ("now 596 wide"). */
+  fixText?: string;
 }
 
 /**
@@ -207,6 +209,7 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
       changes,
       ...treatmentOf(category, isCut(before.id), fixByHand.has(p.id)),
       ...(category === 'changedFinishing' ? { flags: flagsOf(changes, job.progress?.[before.id]) } : {}),
+      ...(category === 'changedCut' && isCut(before.id) ? { fixText: describeChange(before, p, old, next) } : {}),
     });
   }
   const matchedOld = new Set([...match.values()].map((m) => m.part.id));
@@ -331,7 +334,6 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
   const nesting = needsNesting(d);
 
   const oldParts = new Map(current.parts.map((p) => [p.id, p]));
-  const newParts = new Map(next.model.parts.map((p) => [p.id, p]));
   const oldWhere = locations(doc.plan);
   let progress = renameKeys(doc.progress, renames);
   let plan = doc.plan && renamePlanParts(doc.plan, renames);
@@ -349,13 +351,10 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
         if (plan) plan = remakePart(plan, id);
         progress = withoutPart(progress, id);
         break;
-      case 'fixByHand': {
-        const before = e.oldId === undefined ? undefined : oldParts.get(e.oldId);
-        const after = newParts.get(id);
-        if (before && after) handFixes[id] = [...(handFixes[id] ?? []), describeChange(before, after, current, next.model)];
+      case 'fixByHand':
+        handFixes[id] = [...(handFixes[id] ?? []), e.fixText ?? 'changed'];
         progress = withoutSteps(progress, id, ['manualOps']);
         break;
-      }
       case 'nest':
         vacate.set(id, 'moved');
         break;

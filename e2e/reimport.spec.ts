@@ -109,3 +109,49 @@ test('re-import: older file warning, unpairing, and Regenerate clears the stale 
   await expect(page.getByRole('button', { name: 'Revert last re-import' })).toHaveCount(0);
   await expect(page.getByRole('table', { name: 'Parts of O16' })).toContainText('Toe Kick T3');
 });
+
+test('re-import after cutting: Fix by hand, a Spare, a void and the label batch', async ({ page }) => {
+  await page.getByLabel('Cut: T1 · Shelf').check();
+  await page.getByLabel('Manual ops: T1 · Shelf').check();
+  await page.getByLabel('Cut: T1 · Rail').check();
+  await reimport(page, updatedExport());
+
+  const screen = page.getByRole('region', { name: 'Re-import' });
+  const changed = screen.getByRole('table', { name: 'Changed (cut) Parts' });
+  await expect(changed).toContainText('Already cut: Remake');
+  await changed.getByLabel('Fix by hand T1 · Shelf').check();
+  await expect(changed).toContainText('Already cut: fix by hand (now 517 wide)');
+  await expect(screen.getByRole('table', { name: 'Removed Parts' })).toContainText('Already cut: becomes a Spare');
+  await screen.getByRole('button', { name: 'Apply re-import' }).click();
+
+  // Fix by hand: ticks kept, a new unticked Manual op that says what changed.
+  await expect(page.getByLabel('Cut: T1 · Shelf')).toBeChecked();
+  await expect(page.getByLabel('Manual ops: T1 · Shelf')).not.toBeChecked();
+  await expect(page.getByRole('region', { name: 'Manual ops' })).toContainText('now 517 wide');
+  await expect(page.getByRole('status', { name: 'Export updated' })).toContainText('Export updated, 0 Parts need nesting');
+
+  // The rail was cut: a Spare, greyed in its Breakdown, until dismissed.
+  const spares = page.getByRole('region', { name: 'Spares' });
+  await expect(spares).toContainText('T1 · Rail');
+  await expect(spares).toContainText('Saw · W18-1');
+  await expect(page.getByRole('button', { name: /Print labels for this re-import \(2\)/ })).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: /Print labels for this re-import/ }).click();
+  expect((await download).suggestedFilename()).toMatch(/\.reimport-labels\.pdf$/);
+
+  await spares.getByRole('button', { name: 'Dismiss T1 · Rail' }).click();
+  await expect(page.getByRole('region', { name: 'Spares' })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Spares' })).toHaveCount(0);
+  await expect(page.getByLabel('Cut: T1 · Shelf')).toBeChecked();
+});
+
+test('re-import before cutting on a Locked Blank: a greyed "moved to …" void', async ({ page }) => {
+  await page.getByLabel('Cut: T1 · Door').check();
+  await reimport(page, updatedExport());
+  await page.getByRole('region', { name: 'Re-import' }).getByRole('button', { name: 'Apply re-import' }).click();
+  const layout = page.getByRole('img', { name: 'Layout of W18-1-A' });
+  await expect(layout.locator('g.void title')).toHaveText('#2 T1 · Shelf (moved: needs nesting)');
+  await page.getByRole('status', { name: 'Export updated' }).getByRole('button', { name: 'Regenerate' }).click();
+  await expect(layout.locator('g.void title')).toHaveText(/#2 T1 · Shelf \(moved to W18-\d-[A-Z] #\d\)/);
+});

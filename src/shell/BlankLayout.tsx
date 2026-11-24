@@ -7,10 +7,12 @@ interface Props {
   nameOf: (partId: string) => string;
   /** The Side B file id of a Flip Part (drawn shaded); undefined for other Parts. */
   sideBOf: (partId: string) => string | undefined;
+  /** What a re-import void says ("moved to W18-2-A #1"); undefined for a Part cut here. */
+  voidOf: (partId: string) => string | undefined;
 }
 
 /** A plain SVG of one Blank's Layout: front edge at the bottom, X to the right, in mm. */
-export function BlankLayout({ blank, clampMargin, nameOf, sideBOf }: Props) {
+export function BlankLayout({ blank, clampMargin, nameOf, sideBOf, voidOf }: Props) {
   const mm = (um: number) => um / 1000;
   const L = mm(blank.length);
   const W = mm(blank.width);
@@ -43,10 +45,17 @@ export function BlankLayout({ blank, clampMargin, nameOf, sideBOf }: Props) {
         const x = mm(p.x);
         const y = flipY(mm(p.y), h);
         const sideB = sideBOf(p.partId);
-        const classes = [p.narrow ? 'narrow' : '', sideB === undefined ? '' : 'flip', p.remade ? 'remade' : '']
+        const voided = p.voided === undefined ? undefined : (voidOf(p.partId) ?? p.voided);
+        const greyed = p.remade === true || voided !== undefined;
+        const classes = [
+          p.narrow ? 'narrow' : '',
+          sideB === undefined ? '' : 'flip',
+          p.remade ? 'remade' : '',
+          voided === undefined ? '' : 'void',
+        ]
           .join(' ')
           .trim();
-        const notes = `${p.narrow ? ' (narrow: check tabs)' : ''}${sideB === undefined ? '' : ` (Flip Part: Side B ${sideB})`}${p.remade ? ' (Remake: cut again on another Blank)' : ''}`;
+        const notes = `${p.narrow ? ' (narrow: check tabs)' : ''}${sideB === undefined ? '' : ` (Flip Part: Side B ${sideB})`}${p.remade ? ' (Remake: cut again on another Blank)' : ''}${voided === undefined ? '' : ` (${voided})`}`;
         return (
           <g key={p.partId} className={classes || undefined}>
             <title>{`#${String(p.n)} ${nameOf(p.partId)}${notes}`}</title>
@@ -55,8 +64,9 @@ export function BlankLayout({ blank, clampMargin, nameOf, sideBOf }: Props) {
               y={y}
               width={w}
               height={h}
-              fill={p.remade ? 'var(--remade-bg)' : sideB === undefined ? 'var(--part-bg)' : 'var(--flip-bg)'}
-              opacity={p.remade ? 0.6 : undefined}
+              fill={greyed ? 'var(--remade-bg)' : sideB === undefined ? 'var(--part-bg)' : 'var(--flip-bg)'}
+              opacity={greyed ? 0.6 : undefined}
+              strokeOpacity={voided === undefined ? undefined : 0.5}
               stroke={p.narrow ? 'var(--warn)' : 'var(--part)'}
               strokeWidth={p.narrow ? 4 : 2}
               strokeDasharray={p.narrow ? '10 5' : undefined}

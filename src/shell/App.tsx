@@ -17,6 +17,7 @@ import {
 } from '../core/job.ts';
 import {
   createJobDocument,
+  dismissSpare,
   fromJobFile,
   jobFileName,
   openJobDocument,
@@ -30,7 +31,7 @@ import {
 } from '../core/job-store/document.ts';
 import type { JobSummary } from '../core/job-store/store.ts';
 import type { Model, Part } from '../core/model.ts';
-import type { PartMode, SawReason, SheetPlan, SideBFile } from '../core/planner/index.ts';
+import { isLive, type PartMode, type SawReason, type SheetPlan, type SideBFile } from '../core/planner/index.ts';
 import {
   apply,
   boardId,
@@ -43,7 +44,7 @@ import {
   type ProgressEvent,
   type Step,
 } from '../core/progress.ts';
-import { applyReimport, diff, revertReimport, type Unpair } from '../core/reimport.ts';
+import { applyReimport, diff, revertReimport, voidText, type Unpair } from '../core/reimport.ts';
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
@@ -54,7 +55,7 @@ import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
 import { JobList } from './JobList.tsx';
 import { PartDetail } from './PartDetail.tsx';
-import { ReimportDiff, ReimportLog } from './ReimportDiff.tsx';
+import { ReimportDiff, ReimportLog, SparesList } from './ReimportDiff.tsx';
 import { ProgressPanel } from './ProgressPanel.tsx';
 import { ScanMode } from './ScanMode.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
@@ -82,6 +83,8 @@ interface PendingReimport {
   rawExport: string;
   model: Model;
   unpaired: Unpair[];
+  /** New ids of Changed (cut) Parts already cut that the maker fixes by hand instead of remaking. */
+  fixByHand: string[];
 }
 
 /** localStorage key of the Job to reopen after a reload. */
@@ -239,16 +242,20 @@ export function App() {
       setLoadError(`${file.name} is not a valid Parts Export v1. The Job is unchanged.`);
       return;
     }
-    setReimport({ fileName: file.name, rawExport: text, model: result.model, unpaired: [] });
+    setReimport({ fileName: file.name, rawExport: text, model: result.model, unpaired: [], fixByHand: [] });
   }
 
   /** Applies the reviewed re-import, all or nothing, and reopens the Job from its new document. */
   function onApplyReimport() {
     if (!open || !reimport) return;
-    const reviewed = diff({ model: open.model, plan: open.doc.plan }, reimport.model, { unpaired: reimport.unpaired });
-    const doc = applyReimport(open.doc, open.model, reimport, reviewed, now());
+    const doc = applyReimport(open.doc, open.model, reimport, reviewDiff(open, reimport), now());
     setReimport(null);
     reopen(doc);
+  }
+
+  function onDismissSpare(partId: string) {
+    if (!open) return;
+    save(dismissSpare(open.doc, partId, now()), open.model, open.job);
   }
 
   function onRevertReimport() {
@@ -611,11 +618,17 @@ export function App() {
           {reimport && (
             <ReimportDiff
               fileName={reimport.fileName}
-              diff={diff({ model: open.model, plan: open.doc.plan }, reimport.model, { unpaired: reimport.unpaired })}
+              diff={reviewDiff(open, reimport)}
               onUnpair={(entry) => {
                 if (entry.oldId === undefined || entry.newId === undefined) return;
                 const pair = { oldId: entry.oldId, newId: entry.newId };
                 setReimport({ ...reimport, unpaired: [...reimport.unpaired, pair] });
+              }}
+              onFixByHand={(entry, fix) => {
+                const id = entry.newId;
+                if (id === undefined) return;
+                const others = reimport.fixByHand.filter((x) => x !== id);
+                setReimport({ ...reimport, fixByHand: fix ? [...others, id] : others });
               }}
               onApply={onApplyReimport}
               onCancel={() => {
@@ -624,6 +637,7 @@ export function App() {
             />
           )}
           <ReimportLog log={open.doc.reimportLog} />
+          <SparesList spares={open.doc.spares} onDismiss={onDismissSpare} />
           {!job && <ImportSummary model={open.model} issues={issues} />}
         </>
       )}
@@ -767,11 +781,14 @@ export function App() {
               skipped: issues.flatMap((i) =>
                 i.kind === 'skipped' ? [{ label: i.label, name: i.name, reason: i.reason }] : [],
               ),
+              spares: open?.doc.spares ?? [],
+              reimportLog: open?.doc.reimportLog ?? [],
             }}
           />
           <LabelsPanel
             plan={job.plan}
             job={{ name: open?.doc.name ?? job.model.projectName, shortId: open?.doc.shortId ?? '', model: job.model }}
+            reimportBatch={open?.doc.reimportLog.at(-1)?.labelIds ?? []}
           />
           {rolled && <ProgressPanel rollup={rolled} owners={job.model.owners} />}
           <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
@@ -790,7 +807,7 @@ export function App() {
               />
               <h4>Breakdown</h4>
               {sheet.boards.map((board) => {
-                const sawLeft = board.sawParts.filter((p) => !p.remade && progress[p.partId]?.cut === undefined).length;
+                const sawLeft = board.sawParts.filter((p) => isLive(p) && progress[p.partId]?.cut === undefined).length;
                 return (
                   <div key={board.number}>
                     <BoardBreakdown code={sheet.code} board={board} nameOf={nameOf} onDiscard={onDiscard} />
@@ -841,6 +858,7 @@ export function App() {
                       clampMargin={blank.clampMargin ?? job.plan.settings.clampMargin}
                       nameOf={nameOf}
                       sideBOf={sideBOf}
+                      voidOf={(id) => voidText(job.plan, id)}
                     />
                     <ol>
                       {blank.parts.map((p) => {
@@ -951,15 +969,23 @@ function JobNameField(props: { name: string; onCommit: (name: string) => void })
   );
 }
 
+/** The diff under review: the open Job's ticks decide Remake or Spare; the maker's unpairs and Fix by hand choices. */
+function reviewDiff(open: OpenJob, reimport: PendingReimport) {
+  return diff({ model: open.model, plan: open.doc.plan, progress: open.doc.progress }, reimport.model, {
+    unpaired: reimport.unpaired,
+    fixByHand: reimport.fixByHand,
+  });
+}
+
 /** Where each Part is cut, Job-wide: `W18-1-A #1` on a Blank, `Saw · Board 1` for a Saw Part. */
 function partLocations(sheets: SheetPlan[]): Map<string, string> {
   const where = new Map<string, string>();
   for (const sheet of sheets) {
     for (const board of sheet.boards) {
       for (const blank of board.blanks) {
-        for (const p of blank.parts) if (!p.remade) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+        for (const p of blank.parts) if (isLive(p)) where.set(p.partId, `${blank.id} #${String(p.n)}`);
       }
-      for (const p of board.sawParts) if (!p.remade) where.set(p.partId, `Saw · ${sheet.code} Board ${String(board.number)}`);
+      for (const p of board.sawParts) if (isLive(p)) where.set(p.partId, `Saw · ${sheet.code} Board ${String(board.number)}`);
     }
     for (const id of sheet.unplaced) where.set(id, 'Saw · too big for a Board');
     for (const id of sheet.overflow ?? []) where.set(id, 'waiting for a Board');
@@ -993,10 +1019,10 @@ function PartList(props: {
   for (const board of sheet.boards) {
     for (const blank of board.blanks) {
       for (const p of blank.parts) {
-        if (!p.remade) where.set(p.partId, { text: `${blank.id} #${String(p.n)}`, narrow: p.narrow });
+        if (isLive(p)) where.set(p.partId, { text: `${blank.id} #${String(p.n)}`, narrow: p.narrow });
       }
     }
-    for (const p of board.sawParts.filter((x) => !x.remade)) {
+    for (const p of board.sawParts.filter(isLive)) {
       where.set(p.partId, { text: `Saw · Board ${String(board.number)} (${SAW_REASONS[p.reason]})`, narrow: false });
     }
   }

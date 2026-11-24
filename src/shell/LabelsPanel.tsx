@@ -6,13 +6,15 @@ import { downloadBytes, safeFileName } from './download.ts';
 interface Props {
   plan: Plan;
   job: LabelsJob;
+  /** The last re-import's Renamed, Changed and Added Parts ("Print labels for this re-import"). */
+  reimportBatch: readonly string[];
 }
 
 /**
  * Part labels on L7163 sticker sheets: "Labels" shows the sheets as SVG (the same page model the PDF is drawn
  * from); "Download labels PDF" and "Download size ladder PDF" render with pdf-lib, loaded on demand.
  */
-export function LabelsPanel({ plan, job }: Props) {
+export function LabelsPanel({ plan, job, reimportBatch }: Props) {
   const [shown, setShown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pages = useMemo(() => (shown ? labels(plan, job) : []), [shown, plan, job]);
@@ -51,6 +53,23 @@ export function LabelsPanel({ plan, job }: Props) {
         >
           Download size ladder PDF
         </button>
+        {reimportBatch.length > 0 && (
+          <>
+            {' '}
+            <button
+              type="button"
+              onClick={() =>
+                void download(
+                  () => labels(plan, { ...job, partIds: reimportBatch }),
+                  `Labels for re-import · ${job.name}`,
+                  `${safeFileName(job.name)}.reimport-labels.pdf`,
+                )
+              }
+            >
+              Print labels for this re-import ({reimportBatch.length})
+            </button>
+          </>
+        )}
       </p>
       <p>Print on L7163 sheets (2 × 7, 99.1 × 38.1 mm) at 100 %; stick each label on the Part&apos;s bottom face.</p>
       {error && (
