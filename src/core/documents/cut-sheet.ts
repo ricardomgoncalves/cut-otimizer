@@ -22,7 +22,7 @@ import {
   type Cell,
 } from './layout.ts';
 import { A4, BLACK, type Item, type Page } from './page.ts';
-import { sawCuts } from './saw.ts';
+import { sawCuts, type SawCutRow } from './saw.ts';
 import { textWidth as textWidthOf } from './text.ts';
 
 /** What the cut sheet needs besides the Plan. */
@@ -321,10 +321,11 @@ function sawBoardPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, board: Bo
   const model = job.model.sheets.find((s) => s.id === sheet.sheetId);
   const nameOf = partName(job);
   const title = `1 · Saw · ${sheet.code} · Board ${String(board.number)} of ${String(sheet.boards.length)}`;
-  const kept = board.offcuts.filter((o) => o.kept).length;
+  const offcuts = board.offcuts.filter((o) => !o.used);
+  const kept = offcuts.filter((o) => o.kept && !o.discarded).length;
   const sub = [
     model ? `${model.name} · ${sizeText(board.length, board.width)}` : sizeText(board.length, board.width),
-    [plural(board.blanks.length, 'Blank'), plural(board.sawParts.length, 'Saw Part'), `${plural(board.offcuts.length, 'Offcut')} (${String(kept)} kept)`].join(', '),
+    [plural(board.blanks.length, 'Blank'), plural(board.sawParts.length, 'Saw Part'), `${plural(offcuts.length, 'Offcut')} (${String(kept)} kept)`].join(', '),
   ].join(' · ');
   const flow = new Flow((page, continued) =>
     workHeader(page, job, continued ? `${title} (continued)` : title, sub),
@@ -335,21 +336,20 @@ function sawBoardPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, board: Bo
 
   flow.heading('Cuts, in order');
   const rows = sawCuts(plan, sheet, board, nameOf);
-  if (rows.length === 0) {
-    flow.paragraph('No cuts: the Board is used whole.');
-  } else {
+  // Offcut cut labels (`K1.1a`) need a wider number column.
+  const cutTable = (part: SawCutRow[], wide = false) =>
     table(
       flow,
       MARGIN,
       [
-        { header: '#', width: 10 },
+        { header: '#', width: wide ? 15 : 10 },
         { header: 'Cut', width: 14 },
         { header: 'Fence (mm)', width: 22, align: 'end' },
         { header: 'Measured from', width: 38 },
-        { header: 'Gives', width: CONTENT_WIDTH - 94 },
+        { header: 'Gives', width: CONTENT_WIDTH - 94 - (wide ? 5 : 0) },
         { header: 'Done', width: 10, align: 'middle' },
       ],
-      rows.map((r): Cell[] => [
+      part.map((r): Cell[] => [
         { text: r.label, bold: true },
         r.kind === 'rip' ? 'Rip' : 'Cross',
         { text: mmText(r.fence), bold: true },
@@ -358,6 +358,14 @@ function sawBoardPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, board: Bo
         { tick: true },
       ]),
     );
+  const own = rows.filter((r) => r.offcut === undefined);
+  if (own.length === 0) flow.paragraph('No cuts: the Board is used whole.');
+  else cutTable(own);
+  // Kept Offcuts cut up later for Parts that needed nesting: each has saw entries of its own.
+  for (const id of [...new Set(rows.flatMap((r) => (r.offcut === undefined ? [] : [r.offcut])))]) {
+    const o = board.offcuts.find((x) => x.id === id);
+    flow.heading(`From kept Offcut ${id}${o ? ` (${sizeText(o.length, o.width)})` : ''}`);
+    cutTable(rows.filter((r) => r.offcut === id), true);
   }
   flow.paragraph(
     `Settings are to the near side of the blade · kerf ${mmText(plan.settings.sawKerf)} · trim ${mmText(edgeTrimFor(plan.settings, sheet.sheetId))}`,
@@ -404,11 +412,15 @@ function breakdownDrawing(
 
   for (const o of board.offcuts) {
     const r = rect(o.x, o.y, o.length, o.width);
-    if (o.kept) {
+    if (o.used) {
+      // Cut up later: its outline only; its Blanks and leftovers are drawn on it.
+      items.push({ kind: 'box', ...r, stroke: GREY, lineWidth: 0.3, dash: [1.5, 1] });
+    } else if (o.kept && !o.discarded) {
       items.push({ kind: 'box', ...r, fill: WHITE, stroke: GREY, lineWidth: 0.2, dash: [1.5, 1] });
-      items.push(...pieceLabel(r, 'Keep', sizeText(o.length, o.width), GREY));
+      items.push(...pieceLabel(r, o.id ? `Keep ${o.id}` : 'Keep', sizeText(o.length, o.width), GREY));
     } else {
-      items.push(...pieceLabel(r, '', `Waste ${sizeText(o.length, o.width)}`, GREY, true));
+      const size = sizeText(o.length, o.width);
+      items.push(...pieceLabel(r, '', o.discarded ? `Discarded ${o.id ?? ''} · ${size}` : `Waste ${size}`, GREY, true));
     }
   }
   for (const b of board.blanks) {
@@ -429,6 +441,11 @@ function breakdownDrawing(
     if (c.kind === 'rip') {
       items.push({ kind: 'line', x1: X(c.x), y1: Y(c.y), x2: X(c.x + c.length), y2: Y(c.y), lineWidth: 0.35, dash: [2, 1] });
       const step: number = lastRip && Math.abs(lastRip.y - Y(c.y)) < 4.2 ? (lastRip.step + 1) % 2 : 0;
+      if (c.from) {
+        // A rip inside a kept Offcut: labelled at the Offcut's left end, on the line.
+        items.push(...cutLabel(X(c.x) + cutLabelWidth(c.label) / 2 + 1, Y(c.y), c.label));
+        continue;
+      }
       items.push(...cutLabel(DRAWING_LEFT - 4.5 - step * 5, Y(c.y), c.label));
       lastRip = { y: Y(c.y), step };
     } else {
@@ -511,10 +528,14 @@ function pieceLabel(
   return items;
 }
 
+function cutLabelWidth(label: string): number {
+  return Math.max(4, label.length * 1.7 + 1.6);
+}
+
 /** A cut number in a small white box centred on (x, y). */
 function cutLabel(x: number, y: number, label: string): Item[] {
   const size = 2.6;
-  const w = Math.max(4, label.length * 1.7 + 1.6);
+  const w = cutLabelWidth(label);
   return [
     { kind: 'box', x: x - w / 2, y: y - 1.9, width: w, height: 3.8, fill: WHITE, stroke: BLACK, lineWidth: 0.3 },
     text(x, y + 0.95, label, size, { bold: true, align: 'middle' }),

@@ -6,7 +6,7 @@
 //   behind strip 2: kept Offcut y 1011.4..2065
 // O16 Board 1 (2440 × 1220, no trim): one strip, Blank O16-1-A 700 × 300, the rest is waste.
 import type { Model, Part } from '../src/core/model.ts';
-import type { Plan } from '../src/core/planner/index.ts';
+import type { Board, Plan } from '../src/core/planner/index.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 
 export const mm = (n: number) => Math.round(n * 1000);
@@ -165,8 +165,8 @@ export const handPlan: Plan = {
           ],
           offcuts: [
             { x: mm(2711.4), y: mm(5), length: mm(83.6), width: mm(600), kept: false },
-            { x: mm(1308.2), y: mm(608.2), length: mm(1486.8), width: mm(400), kept: true },
-            { x: mm(5), y: mm(1011.4), length: mm(2790), width: mm(1053.6), kept: true },
+            { id: 'W18-1-K1', x: mm(1308.2), y: mm(608.2), length: mm(1486.8), width: mm(400), kept: true },
+            { id: 'W18-1-K2', x: mm(5), y: mm(1011.4), length: mm(2790), width: mm(1053.6), kept: true },
           ],
           cuts: [
             { label: '1', kind: 'rip', x: mm(5), y: mm(605), length: mm(2790) },
@@ -215,8 +215,8 @@ export const handPlan: Plan = {
           ],
           sawParts: [],
           offcuts: [
-            { x: mm(703.2), y: 0, length: mm(1736.8), width: mm(229), kept: true },
-            { x: 0, y: mm(232.2), length: mm(2440), width: mm(987.8), kept: true },
+            { id: 'O16-1-K1', x: mm(703.2), y: 0, length: mm(1736.8), width: mm(229), kept: true },
+            { id: 'O16-1-K2', x: 0, y: mm(232.2), length: mm(2440), width: mm(987.8), kept: true },
           ],
           cuts: [
             { label: '1', kind: 'rip', x: 0, y: mm(229), length: mm(2440) },
@@ -247,4 +247,42 @@ function handModelPart(id: string): Part {
   const p = handModel.parts.find((q) => q.id === id);
   if (!p) throw new Error(id);
   return p;
+}
+
+/**
+ * W18 Board 1 of `handPlan` after the door was remade and nested again on kept Offcut K1 (Board Locked):
+ * K1 (x 1308.2..2795, y 608.2..1008.2) gives rip K1.1 at y 908.2 and crosscut K1.1a at x 2008.2 = Blank
+ * W18-1-C (700 × 300); left over: K3 (783.6 × 300, kept) beside it and 1486.8 × 96.8 of waste behind.
+ */
+export function offcutBoard(): Board {
+  const board = handPlan.sheets[0]?.boards[0];
+  const door = board?.blanks[0]?.parts.find((p) => p.partId === 'c1/door');
+  if (!board || !door) throw new Error('handPlan changed');
+  return {
+    ...board,
+    blanks: [
+      ...board.blanks.map((b) => ({ ...b, parts: b.parts.map((p) => (p.partId === 'c1/door' ? { ...p, remade: true } : p)) })),
+      {
+        id: 'W18-1-C',
+        letter: 'C',
+        x: mm(1308.2),
+        y: mm(608.2),
+        length: mm(700),
+        width: mm(300),
+        from: 'W18-1-K1',
+        clampMargin: mm(40),
+        parts: [{ ...door, n: 1, x: mm(40), y: mm(40), rotated: false }],
+      },
+    ],
+    offcuts: [
+      ...board.offcuts.map((o) => (o.id === 'W18-1-K1' ? { ...o, used: true } : o.id === 'W18-1-K2' ? { ...o, discarded: true } : o)),
+      { id: 'W18-1-K3', x: mm(2011.4), y: mm(608.2), length: mm(783.6), width: mm(300), kept: true },
+      { x: mm(1308.2), y: mm(911.4), length: mm(1486.8), width: mm(96.8), kept: false },
+    ],
+    cuts: [
+      ...board.cuts,
+      { label: 'K1.1', kind: 'rip', x: mm(1308.2), y: mm(908.2), length: mm(1486.8), from: 'W18-1-K1' },
+      { label: 'K1.1a', kind: 'cross', x: mm(2008.2), y: mm(608.2), length: mm(300), from: 'W18-1-K1' },
+    ],
+  };
 }

@@ -6,7 +6,7 @@ import { plan, type Board, type Plan, type SheetPlan } from '../src/core/planner
 import { DEFAULT_SETTINGS, edgeTrimFor } from '../src/core/settings.ts';
 import { pagesToPdf } from '../src/shell/pdf.ts';
 import { PDFDocument } from 'pdf-lib';
-import { handModel, handPlan, mm } from './cut-sheet-plan.ts';
+import { handModel, handPlan, mm, offcutBoard } from './cut-sheet-plan.ts';
 
 const nameOf = (id: string) => handModel.parts.find((p) => p.id === id)?.displayName ?? id;
 
@@ -27,6 +27,30 @@ describe('sawCuts: the cut table of a Board', () => {
       { label: '1b', kind: 'cross', fence: mm(1700), from: 'Cut 1a', gives: 'SAW · B1 · Back · 1700 × 600' },
       { label: '2', kind: 'rip', fence: mm(400), from: 'Cut 1', gives: 'Strip 2 · 400 wide' },
       { label: '2a', kind: 'cross', fence: mm(1300), from: 'Left end (after trim)', gives: 'W18-1-B · 1300 × 400' },
+    ]);
+  });
+
+  it('gives a kept Offcut cut up later saw entries of its own, measured from its edges', () => {
+    const { sheet } = firstBoard(handPlan);
+    const rows = sawCuts(handPlan, sheet, offcutBoard(), nameOf);
+
+    expect(rows.slice(5)).toEqual([
+      {
+        label: 'K1.1',
+        kind: 'rip',
+        fence: mm(300),
+        from: 'Front edge of W18-1-K1',
+        gives: 'Strip K1.1 · 300 wide',
+        offcut: 'W18-1-K1',
+      },
+      {
+        label: 'K1.1a',
+        kind: 'cross',
+        fence: mm(700),
+        from: 'Left end of W18-1-K1',
+        gives: 'W18-1-C · 700 × 300',
+        offcut: 'W18-1-K1',
+      },
     ]);
   });
 
@@ -152,8 +176,23 @@ describe('cutSheet: cover and saw pages', () => {
     expect(t).toContain('Settings are to the near side of the blade · kerf 3.2 · trim 5');
     // Waste is hatched and sized; the kept Offcuts are marked Keep.
     expect(pages[1]?.items.some((it) => it.kind === 'hatch')).toBe(true);
-    expect(t).toEqual(expect.arrayContaining(['Waste 83.6 × 600', 'Keep', '1486.8 × 400']));
+    expect(t).toEqual(expect.arrayContaining(['Waste 83.6 × 600', 'Keep W18-1-K1', '1486.8 × 400']));
     await expect(describe_(pages[1] as Page)).toMatchFileSnapshot('golden/cut-sheet-saw-W18-1.txt');
+  });
+
+  it('saw page of a Locked Board with a kept Offcut cut up: Keep ids, Discarded, and its own saw entries', async () => {
+    const reused: Plan = {
+      ...handPlan,
+      sheets: handPlan.sheets.map((s, i) => (i === 0 ? { ...s, boards: [offcutBoard()] } : s)),
+    };
+    const page = cutSheet(reused, job)[1];
+    const t = texts(page);
+    expect(t).toEqual(expect.arrayContaining(['W18-1-C', 'Keep W18-1-K3', 'K1.1', 'K1.1a']));
+    expect(t).toContain('From kept Offcut W18-1-K1 (1486.8 × 400)');
+    expect(t).toContain('Left end of W18-1-K1');
+    expect(t).toContain('Discarded W18-1-K2 · 2790 × 1053.6');
+    expect(t).not.toContain('Keep W18-1-K1');
+    await expect(describe_(page as Page)).toMatchFileSnapshot('golden/cut-sheet-saw-W18-1-offcut.txt');
   });
 
   it('renders to one SVG per page and to a PDF with the same page count', async () => {

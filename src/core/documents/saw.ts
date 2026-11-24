@@ -13,12 +13,15 @@ export interface SawCutRow {
   from: string;
   /** What the cut gives: a strip, a Blank or a Saw Part, with its size. */
   gives: string;
+  /** A saw entry of its own, cutting up this kept Offcut (`W18-1-K1`) after the Board's Breakdown. */
+  offcut?: string;
 }
 
 /**
  * The cuts of one Board in saw order. A rip is set from the front edge (after edge trim), then from the
  * edge the previous rip left; a crosscut from the strip's left end (after edge trim), then from the end
  * the previous crosscut left. The kerf falls beyond the fence setting, so it is in no setting.
+ * Cuts that cut up a kept Offcut later (`cut.from`) come last and are set from that Offcut's edges.
  */
 export function sawCuts(
   plan: Plan,
@@ -35,26 +38,41 @@ export function sawCuts(
   ];
 
   const rows: SawCutRow[] = [];
+  let source: string | undefined;
+  let start = { x: trim, y: trim };
+  let edges = { front: `Front edge${afterTrim}`, left: `Left end${afterTrim}` };
   let ripEdge = trim;
   let lastRip: string | null = null;
   let crossEdge = trim;
   let lastCross: string | null = null;
   let strip = '';
   for (const cut of board.cuts) {
-    const cutStrip = /^\d+/.exec(cut.label)?.[0] ?? '';
+    if (cut.from !== source) {
+      // A kept Offcut cut up later: its own entries, set from its own (already sawn) edges.
+      source = cut.from;
+      const o = board.offcuts.find((x) => x.id === cut.from);
+      start = o ? { x: o.x, y: o.y } : { x: trim, y: trim };
+      edges = { front: `Front edge of ${cut.from ?? ''}`, left: `Left end of ${cut.from ?? ''}` };
+      ripEdge = start.y;
+      lastRip = null;
+      strip = '';
+    }
+    const cutStrip = /^(?:K\d+\.)?\d+/.exec(cut.label)?.[0] ?? '';
     if (cutStrip !== strip) {
-      crossEdge = trim;
+      crossEdge = start.x;
       lastCross = null;
       strip = cutStrip;
     }
+    const offcut = cut.from === undefined ? {} : { offcut: cut.from };
     if (cut.kind === 'rip') {
       const fence = cut.y - ripEdge;
       rows.push({
         label: cut.label,
         kind: 'rip',
         fence,
-        from: lastRip === null ? `Front edge${afterTrim}` : `Cut ${lastRip}`,
+        from: lastRip === null ? edges.front : `Cut ${lastRip}`,
         gives: `Strip ${cut.label} · ${mmText(fence)} wide`,
+        ...offcut,
       });
       ripEdge = cut.y + kerf;
       lastRip = cut.label;
@@ -65,8 +83,9 @@ export function sawCuts(
         label: cut.label,
         kind: 'cross',
         fence,
-        from: lastCross === null ? `Left end${afterTrim}` : `Cut ${lastCross}`,
+        from: lastCross === null ? edges.left : `Cut ${lastCross}`,
         gives: piece ? `${piece.label} · ${sizeText(piece.length, piece.width)}` : sizeText(fence, cut.length),
+        ...offcut,
       });
       crossEdge = cut.x + kerf;
       lastCross = cut.label;

@@ -9,10 +9,10 @@ box 21.3,32.3 151x111.5 stroke #666666 0.2 dashed
 box 168.3,117.6 3.4x19.9 fill #ffffff
 text 170.8,127.5 2.4 middle #666666 vertical "Waste 83.6 × 600"
 box 91.8,89.5 80.4x21.6 fill #ffffff stroke #666666 0.2 dashed
-text 132,100 3.6 bold middle #666666 "Keep"
+text 132,100 3.6 bold middle #666666 "Keep W18-1-K1"
 text 132,103.4 2.8 middle #666666 "1486.8 × 400"
 box 21.3,32.3 151x57 fill #ffffff stroke #666666 0.2 dashed
-text 96.7,60.5 3.6 bold middle #666666 "Keep"
+text 96.7,60.5 3.6 bold middle #666666 "Keep W18-1-K2"
 text 96.7,63.9 2.8 middle #666666 "2790 × 1053.6"
 box 21.3,111.3 54.1x32.5 fill #ffffff stroke #000000 0.4
 text 48.3,127.2 3.6 bold middle #000000 "W18-1-A"
