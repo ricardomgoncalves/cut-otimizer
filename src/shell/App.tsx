@@ -42,6 +42,7 @@ import {
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
+import { CutSheetPanel } from './CutSheetPanel.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
 import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
@@ -543,6 +544,17 @@ export function App() {
               </button>
             </div>
           )}
+          <CutSheetPanel
+            plan={job.plan}
+            job={{
+              name: open?.doc.name ?? job.model.projectName,
+              shortId: open?.doc.shortId ?? '',
+              model: job.model,
+              skipped: issues.flatMap((i) =>
+                i.kind === 'skipped' ? [{ label: i.label, name: i.name, reason: i.reason }] : [],
+              ),
+            }}
+          />
           {rolled && <ProgressPanel rollup={rolled} owners={job.model.owners} />}
           <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
           {job.plan.sheets.map((sheet) => (

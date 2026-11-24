@@ -142,7 +142,13 @@ function buildModel(file: PartsExport): ImportResult {
       }),
     ),
   );
-  return { model: { projectName: file.project.name, sheets, owners, parts }, issues };
+  const edgebands = file.materials.edgebands.map((e) => ({
+    id: e.id,
+    name: e.name,
+    thickness: e.thickness,
+    width: e.width,
+  }));
+  return { model: { projectName: file.project.name, sheets, edgebands, owners, parts }, issues };
 }
 
 /**

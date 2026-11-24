@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:types": "bun scripts/gen-types.ts",
+    "gen:fonts": "bun scripts/gen-font-metrics.ts",
     "e2e": "playwright test",
     "check": "bun run typecheck && bun run lint && bun run test && bun run build && bun run e2e"
   },
@@ -21,6 +22,7 @@
     "fflate": "0.8.2",
     "jsqr": "1.4.0",
     "maxrects-packer": "^3.0.0",
+    "pdf-lib": "1.17.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

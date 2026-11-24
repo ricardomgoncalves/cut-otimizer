@@ -35,6 +35,7 @@ function door(id: string, bottom: CncOp[], size: { length: number; width: number
 function modelOf(parts: Part[]): Model {
   return {
     projectName: 'Doors',
+    edgebands: [],
     sheets: [
       { id: 's1', name: 'White 18', code: 'W18', thickness: mm(18), length: mm(2800), width: mm(2070), grain: 'none' },
     ],
