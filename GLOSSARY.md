@@ -77,6 +77,18 @@ _Avoid_: profile, config
 **Locked**:
 Describes a Board or Blank that has at least one Part ticked Cut. Regenerating Layouts leaves locked Boards and Blanks as they are.
 
+**Step**:
+One tracked stage of a Part's progress: Cut, Side B, Banded or Manual ops. A Part has only the Steps that apply to it (Side B only for a Flip Part, Banded only if it has an Edgeband, Manual ops only if it has any). Each Step is ticked in the app; Blank, Board, Sheet, Cabinet and Job progress is computed from these ticks and never stored.
+_Avoid_: status, stage, state
+
+**Done**:
+Describes a Part whose applicable Steps are all ticked. A Cabinet whose Parts are all Done is ready to assemble.
+_Avoid_: finished, complete
+
+**Remake**:
+Marking a ruined Part to be cut again: its ticks are cleared and it is re-nested onto a new Blank at the next regenerate, while its old Blank keeps it greyed out.
+_Avoid_: recut, redo
+
 **Manual op**:
 An op the CNC does not run: an edge-face op, a `bottom` op kind set to manual in Machine settings, or an op that can't be drawn as a hole or rectangle (a mitre, for example). It is printed on the cut sheet and the Part's label instead of going into a file for CAM.
 _Avoid_: hand op, skipped op
