@@ -38,7 +38,7 @@ text 16.5,90.4 2.6 bold middle "2"
 line 91.6,111.1 91.6,89.5 0.4 dashed
 box 89.1,90.2 5x3.8 fill #ffffff stroke #000000 0.3
 text 91.6,93 2.6 bold middle "2a"
-polygon 21,148.6 22.6,146 24.2,148.6
+polygon 21,148.6 22.6,146 24.2,148.6 fill #000000
 text 25.5,149 2.6 "Front edge (Y0) · X = Board length 2800 · grain none"
 text 172.5,149 2.6 end "2800 × 2070"
 text 12,157 3.6 bold "Cuts, in order"
@@ -55,35 +55,35 @@ text 56.8,167.2 3.1 bold end "600"
 text 59.2,167.2 3.1 "Front edge (after trim)"
 text 97.2,167.2 3.1 "Strip 1 · 600 wide"
 box 191.4,164.7 3.2x3.2 stroke #000000 0.3
-line 12,168.6 198,168.6 0.1
+line 12,168.6 198,168.6 0.1 #999999
 text 13.2,172 3.1 bold "1a"
 text 23.2,172 3.1 "Cross"
 text 56.8,172 3.1 bold end "1000"
 text 59.2,172 3.1 "Left end (after trim)"
 text 97.2,172 3.1 "W18-1-A · 1000 × 600"
 box 191.4,169.5 3.2x3.2 stroke #000000 0.3
-line 12,173.4 198,173.4 0.1
+line 12,173.4 198,173.4 0.1 #999999
 text 13.2,176.8 3.1 bold "1b"
 text 23.2,176.8 3.1 "Cross"
 text 56.8,176.8 3.1 bold end "1700"
 text 59.2,176.8 3.1 "Cut 1a"
 text 97.2,176.8 3.1 "SAW · B1 · Back · 1700 × 600"
 box 191.4,174.3 3.2x3.2 stroke #000000 0.3
-line 12,178.2 198,178.2 0.1
+line 12,178.2 198,178.2 0.1 #999999
 text 13.2,181.6 3.1 bold "2"
 text 23.2,181.6 3.1 "Rip"
 text 56.8,181.6 3.1 bold end "400"
 text 59.2,181.6 3.1 "Cut 1"
 text 97.2,181.6 3.1 "Strip 2 · 400 wide"
 box 191.4,179.1 3.2x3.2 stroke #000000 0.3
-line 12,183 198,183 0.1
+line 12,183 198,183 0.1 #999999
 text 13.2,186.4 3.1 bold "2a"
 text 23.2,186.4 3.1 "Cross"
 text 56.8,186.4 3.1 bold end "1300"
 text 59.2,186.4 3.1 "Left end (after trim)"
 text 97.2,186.4 3.1 "W18-1-B · 1300 × 400"
 box 191.4,183.9 3.2x3.2 stroke #000000 0.3
-line 12,187.8 198,187.8 0.1
+line 12,187.8 198,187.8 0.1 #999999
 text 12,191.2 2.6 #666666 "Settings are to the near side of the blade · kerf 3.2 · trim 5"
 text 12,290 2.6 #666666 "Kitchen run · Job 7F3A"
-text 198,290 2.6 end #666666 "Page 2 of 3"
+text 198,290 2.6 end #666666 "Page 2 of 9"

@@ -1,14 +1,15 @@
 // The Job document: one versioned record per Job, stored in IndexedDB and saved as `.job.json`.
 // It keeps the raw export verbatim (the model is rebuilt from it by Import), the settings snapshot,
-// Sheet codes, the Plan and the Saw/CNC overrides. Later slices add progress, Offcuts, Spares, the
-// alias table and the re-import log as new fields; a breaking change bumps `jobFormat` and adds a
-// migration from the previous one.
+// Sheet codes, the Plan and the Saw/CNC overrides, progress, the id alias table, the re-import log, the
+// stale flag and the document before the last re-import. Later slices add Offcuts and Spares as new
+// fields; a breaking change bumps `jobFormat` and adds a migration from the previous one.
 import { APP_NAME } from '../app.ts';
 import { importExport, type ImportIssue } from '../import/index.ts';
 import type { Job } from '../job.ts';
 import type { Model } from '../model.ts';
 import type { Plan } from '../planner/index.ts';
 import { STEPS, type IdAliases, type PartTicks, type Progress } from '../progress.ts';
+import type { Category } from '../reimport.ts';
 import { parseSettings, type Settings } from '../settings.ts';
 
 export const JOB_FORMAT = 1;
@@ -49,6 +50,27 @@ export interface JobDocument {
    * (progress.ts `resolveAlias`). Empty until a re-import adds entries; missing in older files.
    */
   idAliases: IdAliases;
+  /** One entry per applied re-import, oldest first (reimport.ts). */
+  reimportLog: ReimportLogEntry[];
+  /**
+   * Set by a re-import: the stored Plan predates the export ("Export updated, n Parts need nesting").
+   * `needsNesting` = Added and Changed (cut) Part ids. Cleared by anything that re-plans (`withJob`).
+   */
+  stale: { needsNesting: string[] } | null;
+  /**
+   * The document as it was before the last re-import ("Revert last re-import"), with its own `previous`
+   * dropped: one level only. Cleared by the next re-plan (`withJob`); replaced by the next re-import.
+   */
+  previous: JobDocument | null;
+}
+
+export interface ReimportLogEntry {
+  /** When it was applied (ISO 8601). */
+  at: string;
+  /** The new export's `exportedAt`, when it has one. */
+  exportedAt?: string;
+  fileName: string;
+  counts: Record<Category, number>;
 }
 
 /** A step from `jobFormat` n to n + 1, keyed by n. */
@@ -88,6 +110,9 @@ export function createJobDocument({ id, shortId, rawExport, fileName, model, set
     sawCncOverrides: {},
     progress: {},
     idAliases: {},
+    reimportLog: [],
+    stale: null,
+    previous: null,
   };
 }
 
@@ -122,7 +147,10 @@ export function openJobDocument(doc: JobDocument): OpenedJob | { error: string }
   return { model, issues, job };
 }
 
-/** Stores a planned, re-planned or Sheet-code-edited Job in its document. */
+/**
+ * Stores a planned, re-planned or Sheet-code-edited Job in its document. A fresh Plan is no longer stale,
+ * and ends "Revert last re-import".
+ */
 export function withJob(doc: JobDocument, job: Job, now: string): JobDocument {
   return {
     ...doc,
@@ -130,6 +158,8 @@ export function withJob(doc: JobDocument, job: Job, now: string): JobDocument {
     sheetCodes: job.sheetCodes,
     sawCncOverrides: job.sawCnc,
     plan: job.plan,
+    stale: null,
+    previous: null,
     updatedAt: now,
   };
 }
@@ -240,7 +270,23 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
     sawCncOverrides: strings('sawCncOverrides', (v): v is 'saw' | 'cnc' => v === 'saw' || v === 'cnc'),
     progress: {},
     idAliases: strings('idAliases', (v): v is string => typeof v === 'string'),
+    reimportLog: [],
+    stale: null,
+    previous: null,
   };
+  const log = raw['reimportLog'] ?? [];
+  if (Array.isArray(log) && log.every(isLogEntry)) doc.reimportLog = log;
+  else problems.push('reimportLog must be a list of re-imports');
+  const stale = raw['stale'] ?? null;
+  if (stale === null || (isRecord(stale) && isStringList(stale['needsNesting']))) {
+    doc.stale = stale as JobDocument['stale'];
+  } else problems.push('stale must list the Parts that need nesting, or be null');
+  const previous = raw['previous'] ?? null;
+  if (previous !== null) {
+    const read = isRecord(previous) ? checkFields(previous) : { error: '' };
+    if ('doc' in read) doc.previous = read.doc;
+    else problems.push('previous must be a Job document or null');
+  }
   const progress = raw['progress'] ?? {};
   if (isRecord(progress) && Object.values(progress).every(isPartTicks)) doc.progress = progress as Progress;
   else problems.push('progress must map Part ids to Step tick times');
@@ -250,6 +296,21 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
 
   if (problems.length > 0) return { error: `This file is not a usable Job file: ${problems.join('; ')}.` };
   return { doc };
+}
+
+function isLogEntry(v: unknown): v is ReimportLogEntry {
+  return (
+    isRecord(v) &&
+    typeof v['at'] === 'string' &&
+    typeof v['fileName'] === 'string' &&
+    (v['exportedAt'] === undefined || typeof v['exportedAt'] === 'string') &&
+    isRecord(v['counts']) &&
+    Object.values(v['counts']).every((n) => typeof n === 'number')
+  );
+}
+
+function isStringList(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
 }
 
 function isPartTicks(v: unknown): v is PartTicks {

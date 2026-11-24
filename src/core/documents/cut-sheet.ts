@@ -1,6 +1,6 @@
-// The cut sheet ("Shop flow" PDF, PRD story 7.1): pages in the order the work happens. This slice
-// writes the cover and the saw pages (one per Board, Run order). Side A, Side B, banding and Owner
-// pages follow in later slices.
+// The cut sheet ("Shop flow" PDF, PRD story 7.1): pages in the order the work happens. The cover and the
+// saw pages (one per Board, Run order) are here; Side A (side-a.ts), the Side B batch (side-b-pages.ts),
+// Edge banding (banding.ts) and the Owner summary (owners.ts) follow.
 import { layerUsage, referenceLayers, type LayerUse } from '../dxf/index.ts';
 import type { Model, PartEdge } from '../model.ts';
 import type { Board, Plan, SheetPlan } from '../planner/index.ts';
@@ -24,25 +24,30 @@ import {
 import { A4, BLACK, type Item, type Page } from './page.ts';
 import { sawCuts, type SawCutRow } from './saw.ts';
 import { textWidth as textWidthOf } from './text.ts';
+import { bandingPages } from './banding.ts';
+import { ownerPages } from './owners.ts';
+import { sideAPages } from './side-a.ts';
+import { sideBPages } from './side-b-pages.ts';
+import { partName, plural, workHeader, type CutSheetJob } from './work.ts';
 
-/** What the cut sheet needs besides the Plan. */
-export interface CutSheetJob {
-  /** The Job name. */
-  name: string;
-  shortId: string;
-  /** Shown as given ("2026-11-24 10:30"): the shell formats it in local time. */
-  generatedAt: string;
-  model: Model;
-  /** The export's Skipped items (the Job is incomplete when there are any). */
-  skipped: { label: string; name: string; reason: string }[];
-}
+export type { CutSheetJob } from './work.ts';
 
-/** The cut sheet's pages: the cover, then one saw page per Board in Run order (longer cut tables carry on). */
+/**
+ * The cut sheet's pages: the cover, one saw page per Board, one Side A page per Blank (Run order), the
+ * Side B batch, Edge banding per Edgeband and the Owner summary. Longer tables carry on onto extra pages.
+ */
 export function cutSheet(plan: Plan, job: CutSheetJob): Page[] {
   const saw = sawPages(plan, job);
   let cover = coverPages(plan, job, 2, saw.length);
   if (cover.length !== 1) cover = coverPages(plan, job, cover.length + 1, saw.length);
-  const pages = [...cover, ...saw];
+  const pages = [
+    ...cover,
+    ...saw,
+    ...sideAPages(plan, job),
+    ...sideBPages(plan, job),
+    ...bandingPages(plan, job),
+    ...ownerPages(plan, job),
+  ];
   pages.forEach((page, i) => {
     const y = A4.height - 7;
     page.items.push(
@@ -54,13 +59,6 @@ export function cutSheet(plan: Plan, job: CutSheetJob): Page[] {
     );
   });
   return pages;
-}
-
-const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;
-
-function partName(job: CutSheetJob): (partId: string) => string {
-  const names = new Map(job.model.parts.map((p) => [p.id, p.displayName]));
-  return (id) => names.get(id) ?? id;
 }
 
 // --- Cover ----------------------------------------------------------------------------------------
@@ -298,23 +296,6 @@ function sawPages(plan: Plan, job: CutSheetJob): Page[] {
     for (const board of sheet.boards) pages.push(...sawBoardPages(plan, job, sheet, board));
   }
   return pages;
-}
-
-/** The page header of a work page: title, subtitle and the Job at the right. Returns where content starts. */
-function workHeader(page: Page, job: CutSheetJob, title: string, sub: string): number {
-  const metaWidth = 64;
-  page.items.push(
-    text(MARGIN, 17, title, FONT.h2, { bold: true, max: CONTENT_WIDTH - metaWidth }),
-    text(MARGIN, 22.5, sub, FONT.small, { colour: GREY, max: CONTENT_WIDTH - metaWidth }),
-    text(A4.width - MARGIN, 15, job.name, FONT.small, { colour: GREY, align: 'end', max: metaWidth }),
-    text(A4.width - MARGIN, 19, `Job ${job.shortId} · generated ${job.generatedAt}`, FONT.small, {
-      colour: GREY,
-      align: 'end',
-      max: metaWidth,
-    }),
-    { kind: 'line', x1: MARGIN, y1: 25, x2: A4.width - MARGIN, y2: 25, lineWidth: 0.5 },
-  );
-  return 26;
 }
 
 function sawBoardPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, board: Board): Page[] {

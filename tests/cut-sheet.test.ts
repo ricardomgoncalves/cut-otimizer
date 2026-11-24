@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS, edgeTrimFor } from '../src/core/settings.ts';
 import { pagesToPdf } from '../src/shell/pdf.ts';
 import { PDFDocument } from 'pdf-lib';
 import { handModel, handPlan, mm, offcutBoard } from './cut-sheet-plan.ts';
+import { pageText as describe_, texts } from './page-text.ts';
 
 const nameOf = (id: string) => handModel.parts.find((p) => p.id === id)?.displayName ?? id;
 
@@ -109,41 +110,16 @@ const job: CutSheetJob = {
   skipped: [{ label: 'T2', name: 'Tall 1', reason: 'invalid' }],
 };
 
-/** The page as text, one item per line: what the golden files hold. */
-function describe_(page: Page): string {
-  const r = (v: number) => String(Math.round(v * 10) / 10);
-  return `${page.items
-    .map((it) => {
-      switch (it.kind) {
-        case 'text':
-          return `text ${r(it.x)},${r(it.y)} ${r(it.size)}${it.bold ? ' bold' : ''}${it.align ? ` ${it.align}` : ''}${it.colour ? ` ${it.colour}` : ''}${it.vertical ? ' vertical' : ''} ${JSON.stringify(it.text)}`;
-        case 'box':
-          return `box ${r(it.x)},${r(it.y)} ${r(it.width)}x${r(it.height)}${it.fill ? ` fill ${it.fill}` : ''}${it.stroke ? ` stroke ${it.stroke} ${r(it.lineWidth ?? 0)}` : ''}${it.dash ? ' dashed' : ''}`;
-        case 'line':
-          return `line ${r(it.x1)},${r(it.y1)} ${r(it.x2)},${r(it.y2)} ${r(it.lineWidth)}${it.dash ? ' dashed' : ''}`;
-        case 'polygon':
-          return `polygon ${it.points.map(([x, y]) => `${r(x)},${r(y)}`).join(' ')}`;
-        case 'hatch':
-          return `hatch ${r(it.x)},${r(it.y)} ${r(it.width)}x${r(it.height)}`;
-        case 'qr':
-          return `qr ${r(it.x)},${r(it.y)} ${r(it.size)}`;
-      }
-    })
-    .join('\n')}\n`;
-}
-
-const texts = (page: Page | undefined) => (page?.items ?? []).flatMap((it) => (it.kind === 'text' ? [it.text] : []));
-
 describe('cutSheet: cover and saw pages', () => {
   const pages = cutSheet(handPlan, job);
 
-  it('is a cover, then one saw page per Board in Run order', () => {
-    expect(pages).toHaveLength(3);
+  it('starts with a cover, then one saw page per Board in Run order', () => {
+    expect(texts(pages[3])[0]).toMatch(/^2 · CNC Side A/);
     expect(texts(pages[1])).toContain('1 · Saw · W18 · Board 1 of 1');
     expect(texts(pages[2])).toContain('1 · Saw · O16 · Board 1 of 1');
     pages.forEach((p, i) => {
       expect(p).toMatchObject({ width: 210, height: 297 });
-      expect(texts(p)).toContain(`Page ${String(i + 1)} of 3`);
+      expect(texts(p)).toContain(`Page ${String(i + 1)} of ${String(pages.length)}`);
     });
   });
 
@@ -201,6 +177,6 @@ describe('cutSheet: cover and saw pages', () => {
     for (const svg of svgs) expect(svg.match(/<svg/g)).toHaveLength(1);
 
     const doc = await PDFDocument.load(await pagesToPdf(pages, { title: 'Cut sheet' }));
-    expect(doc.getPageCount()).toBe(3);
+    expect(doc.getPageCount()).toBe(pages.length);
   });
 });
