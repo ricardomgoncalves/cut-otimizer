@@ -86,4 +86,4 @@ box 191.4,183.9 3.2x3.2 stroke #000000 0.3
 line 12,187.8 198,187.8 0.1
 text 12,191.2 2.6 #666666 "Settings are to the near side of the blade · kerf 3.2 · trim 5"
 text 12,290 2.6 #666666 "Kitchen run · Job 7F3A"
-text 198,290 2.6 end #666666 "Page 2 of 3"
+text 198,290 2.6 end #666666 "Page 2 of 9"

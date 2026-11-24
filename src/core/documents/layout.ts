@@ -103,9 +103,23 @@ export interface Column {
   align?: 'start' | 'end' | 'middle';
 }
 
-export type Cell = string | { text: string; bold?: boolean; colour?: string } | { tick: true };
+/**
+ * A table cell: text, or a tick box. `sub` is a second, smaller grey line under the text (the row grows to
+ * hold it); `pill` shades a box behind the text (a file name to look for, like a Side B file).
+ */
+export type Cell = string | TextCell | { tick: true };
+
+export interface TextCell {
+  text: string;
+  bold?: boolean;
+  colour?: string;
+  sub?: string;
+  pill?: boolean;
+}
 
 const ROW = 4.8;
+/** The extra height of a row with a `sub` line. */
+const SUB = 2.8;
 const PAD = 1.2;
 
 /**
@@ -126,15 +140,20 @@ export function table(flow: Flow, x: number, columns: Column[], rows: Cell[][], 
   flow.ensure(2 * ROW);
   header();
   for (const row of rows) {
-    if (flow.ensure(ROW)) header();
-    flow.y += ROW;
+    const height = row.some((cell) => typeof cell === 'object' && 'sub' in cell && cell.sub !== undefined) ? ROW + SUB : ROW;
+    if (flow.ensure(height)) header();
+    const baseline = flow.y + ROW - PAD;
+    flow.y += height;
     let cx = x;
     columns.forEach((c, i) => {
       const cell = row[i] ?? '';
       if (typeof cell === 'object' && 'tick' in cell) {
-        flow.add(tickBox(cx + (c.width - 3.2) / 2, flow.y - PAD));
+        flow.add(tickBox(cx + (c.width - 3.2) / 2, baseline));
       } else if (cell !== '') {
-        flow.add(cellText(cx, flow.y - PAD - 0.2, c, typeof cell === 'string' ? { text: cell } : cell, size));
+        const t: TextCell = typeof cell === 'string' ? { text: cell } : cell;
+        if (t.pill) flow.add(pill(cx, baseline - 0.2, c, t, size));
+        flow.add(cellText(cx, baseline - 0.2, c, t, size));
+        if (t.sub !== undefined) flow.add(cellText(cx, baseline - 0.2 + SUB, c, { text: t.sub, colour: GREY }, FONT.small * 0.9));
       }
       cx += c.width;
     });
@@ -142,11 +161,20 @@ export function table(flow: Flow, x: number, columns: Column[], rows: Cell[][], 
   }
 }
 
+/** The shaded box behind a pill cell's text. */
+function pill(x: number, baseline: number, c: Column, cell: TextCell, size: number): Item {
+  const label = cellText(x, baseline, c, cell, size);
+  if (label.kind !== 'text') throw new Error('cellText makes text');
+  const w = textWidth(label.text, size, cell.bold);
+  const start = label.align === 'middle' ? label.x - w / 2 : label.align === 'end' ? label.x - w : label.x;
+  return { kind: 'box', x: start - 0.8, y: baseline - size * 0.85, width: w + 1.6, height: size * 1.15, fill: SHADE };
+}
+
 function cellText(
   x: number,
   baseline: number,
   c: Column,
-  cell: { text: string; bold?: boolean; colour?: string },
+  cell: TextCell,
   size: number,
 ): Item {
   const inner = c.width - 2 * PAD;

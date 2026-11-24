@@ -2,5 +2,6 @@
 // renderer (shell, pdf-lib) and an SVG renderer (preview) draw the same way.
 export { cutSheet, type CutSheetJob } from './cut-sheet.ts';
 export { sawCuts, type SawCutRow } from './saw.ts';
+export { partLocations, partRunOrder } from './work.ts';
 export { A4, BLACK, hatchLines, qrSquares, type BoxItem, type HatchItem, type Item, type LineItem, type Page, type PolygonItem, type QrItem, type TextItem } from './page.ts';
 export { pageToSvg } from './svg.ts';
