@@ -51,7 +51,7 @@ A Part cut straight from a Board in the Breakdown rather than on the CNC. A Part
 _Avoid_: manual part
 
 **Offcut**:
-A piece of a Board left over after the Breakdown, being neither a Blank nor a Saw Part.
+A piece of a Board left over after the Breakdown, being neither a Blank nor a Saw Part. An Offcut at least Min Offcut size on both sides is **kept**: it gets an id (`W18-1-K1`), goes on the rack, and is stock for new Blanks later in the same Job until it is used or discarded. Smaller Offcuts are waste. Offcuts never carry over to another Job, and the unused area of a Blank is never an Offcut.
 _Avoid_: scrap, remnant
 
 **Layout**:
@@ -75,7 +75,7 @@ The square stop fixed to the bed that a Flip Part is pushed into for Side B. It 
 _Avoid_: jig, registration
 
 **Machine settings**:
-Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf, edge trim and Min CNC width (the shortest cut side a Part may have to be nested without a warning). A Job keeps a snapshot of them from when its Layouts were generated.
+Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf, edge trim, Min CNC width (the shortest cut side a Part may have to be nested without a warning) and Min Offcut size (the smallest Offcut, on both sides, that is kept as stock). A Job keeps a snapshot of them from when its Layouts were generated.
 _Avoid_: profile, config
 
 **Locked**:
@@ -90,7 +90,7 @@ Describes a Part whose applicable Steps are all ticked. A Cabinet whose Parts ar
 _Avoid_: finished, complete
 
 **Remake**:
-Marking a ruined Part to be cut again: its ticks are cleared and it is re-nested onto a new Blank at the next regenerate, while its old Blank keeps it greyed out.
+Marking a ruined Part to be cut again: its ticks are cleared and it is re-nested onto a new Blank at the next regenerate, while its old Blank keeps it greyed out. The new Blank is cut from a kept Offcut of a Locked Board where one fits; otherwise the app asks before adding a Board to the Sheet.
 _Avoid_: recut, redo
 
 **Manual op**:
