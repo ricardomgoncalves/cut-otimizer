@@ -7,6 +7,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 async function createJob(page: Page) {
   await page.goto('/');
   await page.getByLabel('Load export').setInputFiles(fixture);
+  await page.getByRole('button', { name: 'Plan' }).click();
   await expect(page.getByRole('img', { name: 'Layout of W18-1-A' })).toBeVisible();
 }
 
@@ -19,9 +20,16 @@ async function downloadJob(page: Page): Promise<{ name: string; text: string }> 
 }
 
 test('a new Job is saved in the browser and comes back after a reload', async ({ page }) => {
-  await createJob(page);
+  await page.goto('/');
+  await page.getByLabel('Load export').setInputFiles(fixture);
   const jobs = page.getByRole('region', { name: 'Jobs' });
   await expect(jobs).toContainText(`Synthetic fixture ${today()}`);
+
+  // Saved before it is planned: the import summary comes back.
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Import summary' })).toBeVisible();
+  await page.getByRole('button', { name: 'Plan' }).click();
+  await expect(page.getByRole('img', { name: 'Layout of W18-1-A' })).toBeVisible();
 
   await page.getByLabel('Sheet code for White melamine chipboard 18').fill('WH18');
   await page.getByLabel('Sheet code for White melamine chipboard 18').press('Enter');

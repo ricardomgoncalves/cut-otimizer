@@ -12,6 +12,7 @@ import {
   setArchived,
   shortIdFor,
   toJobFile,
+  withJob,
   type JobDocument,
 } from '../src/core/job-store/document.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
@@ -23,8 +24,9 @@ const NOW = '2026-11-24T10:15:00.000Z';
 function syntheticDocument(): JobDocument {
   const { model } = importExport(JSON.parse(rawExport));
   if (!model) throw new Error('synthetic fixture must import');
-  const job = generateJob(model, { ...DEFAULT_SETTINGS, clampMargin: 30000 }, { [model.sheets[0]?.id ?? '']: 'WH18' });
-  return createJobDocument({ id: UUID, shortId: 'K7Q2', rawExport, fileName: 'synthetic.parts.json', job, now: NOW });
+  const settings = { ...DEFAULT_SETTINGS, clampMargin: 30000 };
+  const doc = createJobDocument({ id: UUID, shortId: 'K7Q2', rawExport, fileName: 'synthetic.parts.json', model, settings, now: NOW });
+  return withJob(doc, generateJob(model, settings, { [model.sheets[0]?.id ?? '']: 'WH18' }), NOW);
 }
 
 describe('The Job document', () => {
@@ -37,6 +39,15 @@ describe('The Job document', () => {
     expect(doc.archived).toBe(false);
     expect(doc.rawExport).toBe(rawExport);
     expect(doc.sawCncOverrides).toEqual({});
+  });
+
+  it('has no Plan until the export is planned', () => {
+    const { model } = importExport(JSON.parse(rawExport));
+    if (!model) throw new Error('synthetic fixture must import');
+    const doc = createJobDocument({ id: UUID, shortId: 'K7Q2', rawExport, fileName: 'x.json', model, settings: DEFAULT_SETTINGS, now: NOW });
+    expect(doc.plan).toBeNull();
+    expect(doc.sheetCodes).toEqual({});
+    expect(fromJobFile(toJobFile(doc))).toEqual({ doc });
   });
 
   it('can be renamed and archived, which moves its update time', () => {
@@ -124,19 +135,20 @@ describe('opening a Job document', () => {
   it('rebuilds the model from the raw export and keeps the stored Plan, snapshot and Sheet codes', () => {
     const doc = syntheticDocument();
     const opened = openJobDocument(doc);
-    if (!('job' in opened)) throw new Error(opened.error);
-    expect(opened.job.plan).toBe(doc.plan);
-    expect(opened.job.settings).toEqual(doc.settings);
-    expect(opened.job.sheetCodes).toEqual(doc.sheetCodes);
-    expect(opened.job.model.projectName).toBe('Synthetic fixture');
+    if ('error' in opened) throw new Error(opened.error);
+    expect(opened.job?.plan).toBe(doc.plan);
+    expect(opened.job?.settings).toEqual(doc.settings);
+    expect(opened.job?.sheetCodes).toEqual(doc.sheetCodes);
+    expect(opened.model.projectName).toBe('Synthetic fixture');
+    expect(opened.job?.model).toBe(opened.model);
     expect(opened.issues.length).toBeGreaterThan(0);
   });
 
-  it('plans a Job that has no Plan yet with its own snapshot', () => {
-    const doc = { ...syntheticDocument(), plan: null };
-    const opened = openJobDocument(doc);
-    if (!('job' in opened)) throw new Error(opened.error);
-    expect(opened.job.plan.settings.clampMargin).toBe(30000);
+  it('opens a Job with no Plan yet to its model only', () => {
+    const opened = openJobDocument({ ...syntheticDocument(), plan: null });
+    if ('error' in opened) throw new Error(opened.error);
+    expect(opened.job).toBeNull();
+    expect(opened.model.parts.length).toBeGreaterThan(0);
   });
 
   it('reports an export that no longer imports', () => {

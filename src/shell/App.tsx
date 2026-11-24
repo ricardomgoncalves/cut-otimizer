@@ -16,11 +16,14 @@ import {
   type JobDocument,
 } from '../core/job-store/document.ts';
 import type { JobSummary } from '../core/job-store/store.ts';
+import type { Model, Part } from '../core/model.ts';
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
+import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
 import { JobList } from './JobList.tsx';
+import { PartDetail } from './PartDetail.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
 import { loadSettings, saveSettings } from './settings-store.ts';
@@ -28,10 +31,14 @@ import { loadSettings, saveSettings } from './settings-store.ts';
 /** Every Job lives in IndexedDB; every change to the open Job is saved straight away. */
 const store = createDexieJobStore();
 
-/** The Job open in the page: its stored document and the working Job built from it. */
+/**
+ * The Job open in the page: its stored document, the model Import rebuilt from its raw export, and
+ * the planned Job (null while the maker reviews the import summary).
+ */
 interface OpenJob {
   doc: JobDocument;
-  job: Job;
+  model: Model;
+  job: Job | null;
 }
 
 /** localStorage key of the Job to reopen after a reload. */
@@ -82,7 +89,7 @@ export function App() {
           setLoadError(opened.error);
           return;
         }
-        setOpen({ doc, job: opened.job });
+        setOpen({ doc, model: opened.model, job: opened.job });
         setIssues(opened.issues);
       } catch (err) {
         if (current) setStoreError(`The saved Jobs could not be read: ${errorText(err)}`);
@@ -98,8 +105,8 @@ export function App() {
   }
 
   /** Makes `doc` the open Job and saves it. */
-  function save(doc: JobDocument, job: Job) {
-    setOpen({ doc, job });
+  function save(doc: JobDocument, model: Model, job: Job | null) {
+    setOpen({ doc, model, job });
     rememberOpenJob(doc.id);
     store
       .put(doc)
@@ -139,13 +146,27 @@ export function App() {
       setLoadError(`${file.name} is not a valid Parts Export v1. Nothing was loaded.`);
       return;
     }
-    const job = generateJob(result.model, settings);
     const id = crypto.randomUUID();
     const shortId = shortIdFor(
       id,
       jobs.map((j) => j.shortId),
     );
-    save(createJobDocument({ id, shortId, rawExport: text, fileName: file.name, job, now: now() }), job);
+    const doc = createJobDocument({
+      id,
+      shortId,
+      rawExport: text,
+      fileName: file.name,
+      model: result.model,
+      settings,
+      now: now(),
+    });
+    save(doc, result.model, null);
+  }
+
+  function onPlan() {
+    if (!open) return;
+    const job = generateJob(open.model, settings);
+    save(withJob(open.doc, job, now()), open.model, job);
   }
 
   /** Opens a Job document: shows it, and saves it when it came from a file. */
@@ -156,9 +177,9 @@ export function App() {
       return;
     }
     setIssues(opened.issues);
-    if (persist) save(doc, opened.job);
+    if (persist) save(doc, opened.model, opened.job);
     else {
-      setOpen({ doc, job: opened.job });
+      setOpen({ doc, model: opened.model, job: opened.job });
       rememberOpenJob(doc.id);
     }
   }
@@ -193,7 +214,7 @@ export function App() {
   async function onArchive(id: string, archived: boolean) {
     try {
       if (open?.doc.id === id) {
-        save(setArchived(open.doc, archived, now()), open.job);
+        save(setArchived(open.doc, archived, now()), open.model, open.job);
         return;
       }
       const doc = await store.get(id);
@@ -222,7 +243,7 @@ export function App() {
   function onRename(name: string) {
     if (!open) return;
     const doc = renameJob(open.doc, name, now());
-    if (doc !== open.doc) save(doc, open.job);
+    if (doc !== open.doc) save(doc, open.model, open.job);
   }
 
   function onSaveSettings(next: Settings): boolean {
@@ -231,26 +252,26 @@ export function App() {
   }
 
   function onRegenerate() {
-    if (!open) return;
+    if (!open?.job) return;
     const job = regenerate(open.job, settings);
-    save(withJob(open.doc, job, now()), job);
+    save(withJob(open.doc, job, now()), open.model, job);
   }
 
   function onSheetCode(sheetId: string, code: string) {
-    if (!open) return;
+    if (!open?.job) return;
     const result = setSheetCode(open.job, sheetId, code);
     if ('error' in result) {
       setCodeError(result.error);
       return;
     }
     setCodeError(null);
-    save(withJob(open.doc, result.job, now()), result.job);
+    save(withJob(open.doc, result.job, now()), open.model, result.job);
   }
 
   function onDownload() {
-    if (!open) return;
+    if (!open?.job) return;
     const zip = zipFiles(toDxfFiles(open.job.plan));
-    downloadBytes(zip, `${safeFileName(open.job.model.projectName)}.dxf.zip`, 'application/zip');
+    downloadBytes(zip, `${safeFileName(open.model.projectName)}.dxf.zip`, 'application/zip');
   }
 
   function onDownloadJob() {
@@ -262,7 +283,8 @@ export function App() {
   const job = open?.job ?? null;
 
   const schemaErrors = issues.filter((i) => i.kind === 'schema');
-  const warnings = issues.filter((i) => i.kind === 'warning');
+  const partById = new Map<string, Part>(job?.model.parts.map((p) => [p.id, p]) ?? []);
+  const nameOf = (id: string) => partById.get(id)?.displayName ?? id;
   const changed = job ? snapshotChanges(job, settings) : [];
 
   const header = (
@@ -295,7 +317,7 @@ export function App() {
     return (
       <main>
         {header}
-        <SettingsScreen settings={settings} sheets={job?.model.sheets ?? []} onSave={onSaveSettings} />
+        <SettingsScreen settings={settings} sheets={open?.model.sheets ?? []} onSave={onSaveSettings} />
       </main>
     );
   }
@@ -342,7 +364,7 @@ export function App() {
         </div>
       )}
 
-      {open && job && (
+      {open && (
         <>
           <h2>
             {open.doc.name} <small>({open.doc.fileName})</small>
@@ -352,15 +374,27 @@ export function App() {
             {open.doc.archived && ' · archived'}
           </p>
           <JobNameField key={open.doc.name} name={open.doc.name} onCommit={onRename} />
-          {warnings.length > 0 && (
-            <ul className="warnings">
-              {warnings.map((i, k) => (
-                <li key={k}>
-                  {i.partId && <code>{i.partId}</code>} {i.message}
-                </li>
-              ))}
-            </ul>
-          )}
+          <SkippedWarning issues={issues} />
+          <p>
+            {job ? (
+              <button type="button" onClick={onDownload}>
+                Download DXFs
+              </button>
+            ) : (
+              <button type="button" onClick={onPlan}>
+                Plan
+              </button>
+            )}{' '}
+            <button type="button" onClick={onDownloadJob}>
+              Download Job
+            </button>
+          </p>
+          {!job && <ImportSummary model={open.model} issues={issues} />}
+        </>
+      )}
+
+      {job && (
+        <>
           {changed.length > 0 && (
             <div role="status" className="stale">
               <p>
@@ -378,14 +412,6 @@ export function App() {
               {codeError}
             </p>
           )}
-          <p>
-            <button type="button" onClick={onDownload}>
-              Download DXFs
-            </button>{' '}
-            <button type="button" onClick={onDownloadJob}>
-              Download Job
-            </button>
-          </p>
           {job.plan.sheets.map((sheet) => (
             <section key={sheet.sheetId}>
               <h3>
@@ -400,12 +426,7 @@ export function App() {
                 }}
               />
               {sheet.sawParts.length > 0 && (
-                <p>
-                  Saw Parts:{' '}
-                  {sheet.sawParts.map((id) => (
-                    <code key={id}>{id} </code>
-                  ))}
-                </p>
+                <p>Saw Parts: {sheet.sawParts.map(nameOf).join(', ')}</p>
               )}
               {sheet.boards.flatMap((board) =>
                 board.blanks.map((blank) => (
@@ -414,14 +435,23 @@ export function App() {
                       <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
                       {blank.parts.length} Part(s)
                     </figcaption>
-                    <BlankLayout blank={blank} clampMargin={job.plan.settings.clampMargin} />
+                    <BlankLayout blank={blank} clampMargin={job.plan.settings.clampMargin} nameOf={nameOf} />
                     <ol>
-                      {blank.parts.map((p) => (
-                        <li key={p.partId} value={p.n}>
-                          <code>{p.partId}</code> {p.cutLength / 1000} × {p.cutWidth / 1000}
-                          {p.rotated ? ' (turned)' : ''}
-                        </li>
-                      ))}
+                      {blank.parts.map((p) => {
+                        const part = partById.get(p.partId);
+                        const size = `${String(p.cutLength / 1000)} × ${String(p.cutWidth / 1000)}${p.rotated ? ' (turned)' : ''}`;
+                        return (
+                          <li key={p.partId} value={p.n}>
+                            {part ? (
+                              <PartDetail part={part}>
+                                <div>{size}</div>
+                              </PartDetail>
+                            ) : (
+                              <code>{p.partId}</code>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ol>
                   </figure>
                 )),

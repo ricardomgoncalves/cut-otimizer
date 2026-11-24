@@ -5,7 +5,8 @@
 // migration from the previous one.
 import { APP_NAME } from '../app.ts';
 import { importExport, type ImportIssue } from '../import/index.ts';
-import { generateJob, type Job } from '../job.ts';
+import type { Job } from '../job.ts';
+import type { Model } from '../model.ts';
 import type { Plan } from '../planner/index.ts';
 import { parseSettings, type Settings } from '../settings.ts';
 
@@ -50,36 +51,44 @@ export interface NewJob {
   shortId: string;
   rawExport: string;
   fileName: string;
-  job: Job;
+  /** The model Import built from `rawExport` (only its Project name is kept). */
+  model: Model;
+  /** The Machine settings at the time; replaced by the snapshot when the Job is planned. */
+  settings: Settings;
   /** ISO 8601. The default name uses its date. */
   now: string;
 }
 
-/** A new Job document, named `<Project name> <YYYY-MM-DD>`. */
-export function createJobDocument({ id, shortId, rawExport, fileName, job, now }: NewJob): JobDocument {
+/** A new, unplanned Job document, named `<Project name> <YYYY-MM-DD>`. */
+export function createJobDocument({ id, shortId, rawExport, fileName, model, settings, now }: NewJob): JobDocument {
   return {
     jobFormat: JOB_FORMAT,
     id,
     shortId,
-    name: `${job.model.projectName} ${now.slice(0, 10)}`.trim(),
+    name: `${model.projectName} ${now.slice(0, 10)}`.trim(),
     archived: false,
     createdAt: now,
     updatedAt: now,
     fileName,
     rawExport,
-    settings: job.settings,
-    sheetCodes: job.sheetCodes,
-    plan: job.plan,
+    settings,
+    sheetCodes: {},
+    plan: null,
     sawCncOverrides: {},
   };
 }
 
-/**
- * The working Job for a document: the model rebuilt by Import from the raw export, with the stored
- * snapshot, Sheet codes and Plan (a stored Plan is used as is, never recomputed). Also returns the
- * import issues, which are recomputed rather than stored.
- */
-export function openJobDocument(doc: JobDocument): { job: Job; issues: ImportIssue[] } | { error: string } {
+export interface OpenedJob {
+  /** Rebuilt by Import from the raw export. */
+  model: Model;
+  /** Recomputed from the raw export, not stored. */
+  issues: ImportIssue[];
+  /** The planned Job (the stored Plan as is, never recomputed), or null before the Job is planned. */
+  job: Job | null;
+}
+
+/** The working form of a stored Job document. */
+export function openJobDocument(doc: JobDocument): OpenedJob | { error: string } {
   let json: unknown;
   try {
     json = JSON.parse(doc.rawExport);
@@ -88,13 +97,13 @@ export function openJobDocument(doc: JobDocument): { job: Job; issues: ImportIss
   }
   const { model, issues } = importExport(json);
   if (!model) return { error: `The export saved in ${doc.name} is not a valid Parts Export v1.` };
-  const job: Job = doc.plan
+  const job: Job | null = doc.plan
     ? { model, settings: doc.settings, sheetCodes: doc.sheetCodes, plan: doc.plan }
-    : generateJob(model, doc.settings, doc.sheetCodes);
-  return { job, issues };
+    : null;
+  return { model, issues, job };
 }
 
-/** Stores a re-planned (or Sheet-code-edited) Job in its document. */
+/** Stores a planned, re-planned or Sheet-code-edited Job in its document. */
 export function withJob(doc: JobDocument, job: Job, now: string): JobDocument {
   return { ...doc, settings: job.settings, sheetCodes: job.sheetCodes, plan: job.plan, updatedAt: now };
 }

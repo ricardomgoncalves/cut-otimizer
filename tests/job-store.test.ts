@@ -9,6 +9,7 @@ import {
   renameJob,
   setArchived,
   toJobFile,
+  withJob,
   type JobDocument,
 } from '../src/core/job-store/document.ts';
 import { createMemoryJobStore, type JobStore } from '../src/core/job-store/store.ts';
@@ -21,7 +22,8 @@ function documentFor(id: string, shortId: string, now: string): JobDocument {
   const { model } = importExport(JSON.parse(rawExport));
   if (!model) throw new Error('synthetic fixture must import');
   const job = generateJob(model, DEFAULT_SETTINGS);
-  return createJobDocument({ id, shortId, rawExport, fileName: 'synthetic.parts.json', job, now });
+  const doc = createJobDocument({ id, shortId, rawExport, fileName: 'synthetic.parts.json', model, settings: DEFAULT_SETTINGS, now });
+  return withJob(doc, job, now);
 }
 
 const A = () => documentFor('aaaaaaaa-0000-4000-8000-000000000001', 'AAAA', '2026-11-20T09:00:00.000Z');

@@ -20,8 +20,13 @@ describe('importExport', () => {
     const { model } = importExport(readFixture('synthetic.parts.json'));
 
     expect(model?.owners).toEqual([
-      { kind: 'cabinet', id: 'c1', label: 'T1' },
-      { kind: 'generatedItem', id: 'w1.left.lower.c1/toeKick', label: 'Toe Kick T1' },
+      { kind: 'cabinet', id: 'c1', label: 'T1', cabinetName: 'Tall door' },
+      {
+        kind: 'generatedItem',
+        id: 'w1.left.lower.c1/toeKick',
+        label: 'Toe Kick T1',
+        itemKind: 'toeKick',
+      },
     ]);
     expect(model?.parts.map((p) => p.ownerId)).toEqual([
       'c1',
@@ -29,6 +34,42 @@ describe('importExport', () => {
       'c1',
       'c1',
       'w1.left.lower.c1/toeKick',
+    ]);
+  });
+
+  it('names every Part after its Owner label', () => {
+    const { model } = importExport(readFixture('synthetic.parts.json'));
+
+    expect(model?.parts.map((p) => [p.name, p.partName, p.displayName])).toEqual([
+      ['leftSide', 'Left side', 'T1 · Left side'],
+      ['s0.shelf[0]', 'Shelf', 'T1 · Shelf'],
+      ['s0.rail[1]', 'Rail', 'T1 · Rail'],
+      ['s0.door.leaf[0]', 'Door', 'T1 · Door'],
+      ['toeKick', '', 'Toe Kick T1'],
+    ]);
+  });
+
+  it('reports unknown Part path keys', () => {
+    const { issues } = importExport(readFixture('synthetic.parts.json'));
+
+    expect(issues.filter((i) => i.kind === 'unknownKey')).toEqual([
+      { kind: 'unknownKey', key: 'rail', partIds: ['c1/s0.rail[1]'] },
+    ]);
+  });
+
+  it('reports Skipped items with their reasons', () => {
+    const { issues } = importExport(readFixture('synthetic.parts.json'));
+
+    expect(issues.filter((i) => i.kind === 'skipped')).toEqual([
+      {
+        kind: 'skipped',
+        ownerKind: 'cabinet',
+        id: 'c2',
+        label: 'T2',
+        name: 'Tall pantry',
+        reason: 'invalid',
+        problems: ['check.minWidth'],
+      },
     ]);
   });
 
@@ -52,7 +93,7 @@ describe('importExport', () => {
   it('warns about bottom-face ops (no Flip Parts yet) and edge-face ops', () => {
     const { issues } = importExport(readFixture('synthetic.parts.json'));
 
-    expect(issues).toEqual([
+    expect(issues.filter((i) => i.kind === 'warning')).toEqual([
       expect.objectContaining({ kind: 'warning', partId: 'c1/s0.shelf[0]' }),
       expect.objectContaining({ kind: 'warning', partId: 'c1/s0.door.leaf[0]' }),
     ]);

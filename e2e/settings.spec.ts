@@ -14,6 +14,11 @@ async function downloadZip(page: Page): Promise<Record<string, string>> {
   return Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, strFromU8(bytes)]));
 }
 
+async function loadAndPlan(page: Page) {
+  await page.getByLabel('Load export').setInputFiles(fixture);
+  await page.getByRole('button', { name: 'Plan' }).click();
+}
+
 async function setClampMargin(page: Page, mm: string) {
   await page.getByRole('button', { name: 'Machine settings' }).click();
   await page.getByLabel('Clamp margin (mm)').fill(mm);
@@ -62,7 +67,7 @@ test('settings that leave no room on the bed are not saved', async ({ page }) =>
 
 test("a Job's DXFs keep its settings snapshot until it is regenerated", async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Load export').setInputFiles(fixture);
+  await loadAndPlan(page);
   await expect(page.getByRole('img', { name: 'Layout of W18-1-A' })).toBeVisible();
   const before = await downloadZip(page);
 
@@ -79,7 +84,7 @@ test("a Job's DXFs keep its settings snapshot until it is regenerated", async ({
 
 test('an edited Sheet code shows up in Blank ids and file names', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Load export').setInputFiles(fixture);
+  await loadAndPlan(page);
 
   const code = page.getByLabel('Sheet code for White melamine chipboard 18');
   await expect(code).toHaveValue('W18');

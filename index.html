@@ -14,6 +14,9 @@
         --part-bg: #dbe9f6;
         --blank-bg: #f6f3ec;
         --error: #b00020;
+        --warn-bg: #fff4d6;
+        --warn: #8a5a00;
+        --muted: #777;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -24,6 +27,9 @@
           --part-bg: #1d3347;
           --blank-bg: #2a2722;
           --error: #ff6b81;
+          --warn-bg: #3a2f12;
+          --warn: #f2c66d;
+          --muted: #999;
         }
       }
       body {
@@ -34,6 +40,25 @@
       }
       .error {
         color: var(--error);
+      }
+      .warning-box {
+        background: var(--warn-bg);
+        color: var(--warn);
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+      }
+      .raw-name {
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+      table {
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.15rem 0.75rem 0.15rem 0;
+        vertical-align: top;
       }
       figure {
         margin: 1rem 0;
