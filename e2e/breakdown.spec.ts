@@ -38,7 +38,7 @@ test('the narrow op-less Part is a Saw Part, and toggling it to CNC nests it wit
 
   const parts = page.getByRole('table', { name: 'Parts of W18' });
   const rail = parts.getByRole('row', { name: /T1 · Rail/i });
-  await expect(rail).toContainText('Saw · Board 1');
+  await expect(rail).toContainText('W18-1 saw (narrow)');
   await expect(rail).toContainText('narrow');
 
   // The 2100 mm side can't go to the CNC.
@@ -51,7 +51,7 @@ test('the narrow op-less Part is a Saw Part, and toggling it to CNC nests it wit
   // Only Regenerate changes the Plan.
   const waiting = page.getByRole('status', { name: 'Changes wait for Regenerate' });
   await expect(waiting).toContainText('T1 · Rail to the CNC');
-  await expect(rail).toContainText('Saw · Board 1');
+  await expect(rail).toContainText('W18-1 saw (narrow)');
   await waiting.getByRole('button', { name: 'Regenerate' }).click();
   await expect(waiting).toHaveCount(0);
 
