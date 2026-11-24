@@ -25,7 +25,15 @@ const browserOnlyGlobals = [
 }));
 
 export default defineConfig([
-  globalIgnores(['dist', 'playwright-report', 'test-results', 'node_modules']),
+  globalIgnores([
+    'dist',
+    'playwright-report',
+    'test-results',
+    'node_modules',
+    '.claude',
+    'vendor',
+    '**/*.generated.ts',
+  ]),
 
   {
     files: ['**/*.{ts,tsx}'],
@@ -49,7 +57,7 @@ export default defineConfig([
         {
           patterns: [
             {
-              regex: '^(react|react-dom|react/.*|react-dom/.*|dexie|pdf-lib)$',
+              regex: '^(react|react-dom|react/.*|react-dom/.*|dexie|pdf-lib|fflate)$',
               message: 'src/core is pure: no React, DOM or browser-storage libraries.',
             },
             {
@@ -64,7 +72,7 @@ export default defineConfig([
   },
   // Node-side files: configs, Playwright specs, repo-level tests.
   {
-    files: ['*.{js,ts}', 'e2e/**/*.ts', 'tests/**/*.ts'],
+    files: ['*.{js,ts}', 'e2e/**/*.ts', 'tests/**/*.ts', 'scripts/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
 ]);

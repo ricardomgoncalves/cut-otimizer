@@ -21,6 +21,11 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      - name: Generated types are up to date
+        run: |
+          bun run gen:types
+          git diff --exit-code -- src/core/import/parts-export.v1.generated.ts
+
       - name: Typecheck
         run: bun run typecheck
 

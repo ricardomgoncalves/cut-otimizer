@@ -7,5 +7,6 @@
     "lib": ["ES2023"],
     "types": []
   },
-  "include": ["src/core"]
+  // The vendored Parts Export schema is imported as JSON by the Import module.
+  "include": ["src/core", "vendor/parts-export/*.json"]
 }
