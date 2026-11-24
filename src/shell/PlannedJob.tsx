@@ -8,6 +8,7 @@ import { CutSheetPanel } from './CutSheetPanel.tsx';
 import { LabelsPanel } from './LabelsPanel.tsx';
 import { ProgressPanel } from './ProgressPanel.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
+import { sheetAnchor } from './sheet-anchor.ts';
 import { SheetSection } from './SheetSection.tsx';
 import { ManualOpsList, SideBView } from './SideBView.tsx';
 import { STEP_LABELS } from './step-labels.ts';
@@ -19,11 +20,8 @@ interface Props {
   job: Job;
 }
 
-/**
- * The planned Job: what waits for Regenerate, confirmations, the cut sheet and labels, progress, and each
- * Sheet's Breakdowns, Layouts and Parts, then the Side B files.
- */
-export function PlannedJob({ session, open, job }: Props) {
+/** What every part of the planned Job reads, worked out once per render. */
+function derive({ session, open, job }: Props) {
   const { state, actions } = session;
   const { doc } = open;
   const progress = doc.progress;
@@ -39,13 +37,39 @@ export function PlannedJob({ session, open, job }: Props) {
   const reprint = Object.keys(progress).length > 0 ? reprintSelection(job, progress) : null;
   const stale = doc.stale;
   const regenerate = (
-    <button type="button" onClick={actions.regenerate}>
+    <button type="button" className="primary" onClick={actions.regenerate}>
       Regenerate
     </button>
   );
 
+  return { state, actions, doc, progress, nameOf, sideBOf, where, changed, pending, queue, rolled, reprint, stale, regenerate };
+}
+
+/**
+ * What needs the maker's attention in the planned Job, under a "Needs attention" heading: what waits for Regenerate, Parts that did not fit,
+ * and confirmations. Renders nothing when all is in order.
+ */
+export function PlannedNotices(props: Props) {
+  const { job } = props;
+  const { state, actions, nameOf, changed, pending, queue, rolled, stale, regenerate } = derive(props);
+  const any =
+    Boolean(stale) ||
+    queue.waiting.length > 0 ||
+    queue.requests.length > 0 ||
+    state.pendingRemake !== null ||
+    pending.partModes.length > 0 ||
+    pending.sheetCodes.length > 0 ||
+    changed.length > 0 ||
+    state.codeError !== null ||
+    state.pendingUntick !== null;
+  if (!any) return null;
   return (
     <>
+      <div className="panelhead">
+        <span>Needs attention</span>
+        <span className="dot warning" />
+      </div>
+      <div className="pane">
       {stale?.olderPlan && (
         <div role="status" aria-label="Plan from an older version" className="stale warning-box">
           <p>
@@ -169,39 +193,31 @@ export function PlannedJob({ session, open, job }: Props) {
           </button>
         </div>
       )}
-      <CutSheetPanel
-        plan={job.plan}
-        job={{
-          name: doc.name,
-          shortId: doc.shortId,
-          model: job.model,
-          skipped: state.issues.flatMap((i) => (i.kind === 'skipped' ? [{ label: i.label, name: i.name, reason: i.reason }] : [])),
-          spares: doc.spares,
-          reimportLog: doc.reimportLog,
-        }}
-        reprint={reprint}
-      />
-      <LabelsPanel
-        plan={job.plan}
-        job={{ name: doc.name, shortId: doc.shortId, model: job.model }}
-        reimportBatch={doc.reimportLog.at(-1)?.labelIds ?? []}
-        reprint={reprint?.parts ?? null}
-      />
-      <ProgressPanel rollup={rolled} owners={job.model.owners} />
-      <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
+      </div>
+    </>
+  );
+}
+
+/** The stage: each Sheet's Breakdowns, Layouts and Parts, then the Side B files. */
+export function PlannedStage(props: Props) {
+  const { job } = props;
+  const { actions, doc, progress, nameOf, sideBOf, where, queue, rolled, stale } = derive(props);
+  return (
+    <>
       {job.plan.sheets.map((sheet) => (
-        <SheetSection
-          key={sheet.sheetId}
-          job={job}
-          sheet={sheet}
-          progress={progress}
-          rolled={rolled}
-          nameOf={nameOf}
-          sideBOf={sideBOf}
-          where={where}
-          needsNesting={[...(stale?.needsNesting ?? []), ...queue.waiting]}
-          actions={actions}
-        />
+        <div key={sheet.sheetId} id={sheetAnchor(sheet.code)} className="stage-sheet">
+          <SheetSection
+            job={job}
+            sheet={sheet}
+            progress={progress}
+            rolled={rolled}
+            nameOf={nameOf}
+            sideBOf={sideBOf}
+            where={where}
+            needsNesting={[...(stale?.needsNesting ?? []), ...queue.waiting]}
+            actions={actions}
+          />
+        </div>
       ))}
       <SideBView
         files={job.plan.sideB}
@@ -214,6 +230,45 @@ export function PlannedJob({ session, open, job }: Props) {
         }}
         doneOf={(file) => rolled.sideB.find((f) => f.id === file.id)?.done ?? 0}
       />
+    </>
+  );
+}
+
+/** The inspector: progress, the cut sheet and labels, and the Manual ops. */
+export function PlannedInspector(props: Props) {
+  const { job } = props;
+  const { state, doc, nameOf, rolled, reprint } = derive(props);
+  return (
+    <>
+      <div className="pane">
+        <ProgressPanel rollup={rolled} owners={job.model.owners} />
+      </div>
+      <div className="panelhead">Documents</div>
+      <div className="pane">
+        <CutSheetPanel
+          plan={job.plan}
+          job={{
+            name: doc.name,
+            shortId: doc.shortId,
+            model: job.model,
+            skipped: state.issues.flatMap((i) =>
+              i.kind === 'skipped' ? [{ label: i.label, name: i.name, reason: i.reason }] : [],
+            ),
+            spares: doc.spares,
+            reimportLog: doc.reimportLog,
+          }}
+          reprint={reprint}
+        />
+        <LabelsPanel
+          plan={job.plan}
+          job={{ name: doc.name, shortId: doc.shortId, model: job.model }}
+          reimportBatch={doc.reimportLog.at(-1)?.labelIds ?? []}
+          reprint={reprint?.parts ?? null}
+        />
+      </div>
+      <div className="pane">
+        <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
+      </div>
     </>
   );
 }
