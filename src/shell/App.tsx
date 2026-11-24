@@ -6,6 +6,8 @@ import {
   addBoards,
   generateJob,
   needsNesting,
+  partMode,
+  pendingChoices,
   regenerate,
   remake,
   setOffcutDiscarded,
@@ -25,6 +27,7 @@ import {
   setArchived,
   shortIdFor,
   toJobFile,
+  withChoices,
   withJob,
   withProgress,
   type JobDocument,
@@ -409,7 +412,7 @@ export function App() {
       return;
     }
     setCodeError(null);
-    save(withJob(open.doc, result.job, now()), open.model, result.job);
+    save(withChoices(open.doc, result.job, now()), open.model, result.job);
   }
 
   function onPartMode(partId: string, mode: PartMode) {
@@ -420,7 +423,7 @@ export function App() {
       return;
     }
     setCodeError(null);
-    save(withJob(open.doc, result.job, now()), open.model, result.job);
+    save(withChoices(open.doc, result.job, now()), open.model, result.job);
   }
 
   /** Applies a tick, untick or bulk tick to the open Job and saves it. */
@@ -471,6 +474,7 @@ export function App() {
   const sideBOf = (id: string) => sideBById.get(id);
   const whereById = job ? partLocations(job.plan.sheets) : new Map<string, string>();
   const changed = job ? snapshotChanges(job, settings) : [];
+  const pending = job ? pendingChoices(job, open?.doc.progress ?? {}) : { partModes: [], sheetCodes: [] };
   const progress: Progress = open?.doc.progress ?? {};
   // Parts on no Board yet (Remakes not nested again): the next regenerate nests them.
   const overflowIds = new Set(job?.plan.sheets.flatMap((s) => s.overflow ?? []) ?? []);
@@ -763,6 +767,20 @@ export function App() {
                 }}
               >
                 Cancel
+              </button>
+            </div>
+          )}
+          {(pending.partModes.length > 0 || pending.sheetCodes.length > 0) && (
+            <div role="status" aria-label="Changes wait for Regenerate" className="stale">
+              <p>
+                {[
+                  ...pending.partModes.map((id) => `${nameOf(id)} to the ${partMode(job, id) === 'saw' ? 'saw' : 'CNC'}`),
+                  ...pending.sheetCodes.map((id) => `Sheet code ${sheetCode(job, id)}`),
+                ].join(', ')}
+                : the Plan and its files change when you regenerate.
+              </p>
+              <button type="button" onClick={onRegenerate}>
+                Regenerate
               </button>
             </div>
           )}
@@ -1088,7 +1106,7 @@ function PartList(props: {
           .filter((p) => p.sheetId === sheet.sheetId)
           .map((p) => {
             const at = where.get(p.id);
-            const saw = sheet.sawParts.includes(p.id);
+            const saw = partMode(job, p.id) === 'saw';
             const fixed = sheet.sawReasons[p.id] === 'oversize';
             const applicable = steps(job, p.id);
             return (

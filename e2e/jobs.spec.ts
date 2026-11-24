@@ -33,6 +33,7 @@ test('a new Job is saved in the browser and comes back after a reload', async ({
 
   await page.getByLabel('Sheet code for White melamine chipboard 18').fill('WH18');
   await page.getByLabel('Sheet code for White melamine chipboard 18').press('Enter');
+  await page.getByRole('status', { name: 'Changes wait for Regenerate' }).getByRole('button', { name: 'Regenerate' }).click();
   await expect(page.getByRole('img', { name: 'Layout of WH18-1-A' })).toBeVisible();
 
   await page.reload();
@@ -70,6 +71,7 @@ test('Download Job and Open Job move a Job to another browser', async ({ page, b
   await createJob(page);
   await page.getByLabel('Sheet code for White melamine chipboard 18').fill('WH18');
   await page.getByLabel('Sheet code for White melamine chipboard 18').press('Enter');
+  await page.getByRole('status', { name: 'Changes wait for Regenerate' }).getByRole('button', { name: 'Regenerate' }).click();
   await expect(page.getByRole('img', { name: 'Layout of WH18-1-A' })).toBeVisible();
 
   const file = await downloadJob(page);

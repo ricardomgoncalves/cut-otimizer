@@ -12,6 +12,7 @@ import {
   setArchived,
   shortIdFor,
   toJobFile,
+  withChoices,
   withJob,
   withProgress,
   type JobDocument,
@@ -69,7 +70,7 @@ describe('The Job document', () => {
     const toggled = setPartMode(opened.job, 'c1/s0.rail[1]', 'cnc');
     if ('error' in toggled) throw new Error(toggled.error);
 
-    const saved = withJob(doc, toggled.job, NOW);
+    const saved = withJob(doc, regenerate(toggled.job, toggled.job.settings), NOW);
     expect(saved.sawCncOverrides).toEqual({ 'c1/s0.rail[1]': 'cnc' });
     const read = fromJobFile(toJobFile(saved));
     if ('error' in read) throw new Error(read.error);
@@ -77,6 +78,21 @@ describe('The Job document', () => {
     if ('error' in reopened) throw new Error(reopened.error);
     expect(reopened.job?.sawCnc).toEqual({ 'c1/s0.rail[1]': 'cnc' });
     expect(reopened.job?.plan.sheets[0]?.sawParts).toEqual(['c1/leftSide']);
+  });
+
+  it('stores a Saw / CNC choice or a Sheet code without re-planning: a stale Plan and Revert stay', () => {
+    const doc = { ...syntheticDocument(), stale: { needsNesting: ['x'] }, previous: syntheticDocument() };
+    const opened = openJobDocument(doc);
+    if ('error' in opened || !opened.job) throw new Error('must open planned');
+    const toggled = setPartMode(opened.job, 'c1/s0.rail[1]', 'cnc');
+    if ('error' in toggled) throw new Error(toggled.error);
+
+    const saved = withChoices(doc, toggled.job, '2026-11-25T08:00:00.000Z');
+    expect(saved).toEqual({
+      ...doc,
+      sawCncOverrides: { 'c1/s0.rail[1]': 'cnc' },
+      updatedAt: '2026-11-25T08:00:00.000Z',
+    });
   });
 
   it('starts with no ticks, stores them with withProgress, and keeps them through .job.json', () => {

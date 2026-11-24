@@ -91,6 +91,11 @@ test('an edited Sheet code shows up in Blank ids and file names', async ({ page 
   await code.fill('wh18');
   await code.press('Enter');
 
+  // Only Regenerate changes the Plan.
+  const waiting = page.getByRole('status', { name: 'Changes wait for Regenerate' });
+  await expect(waiting).toContainText('Sheet code WH18');
+  await expect(page.getByRole('img', { name: 'Layout of W18-1-A' })).toBeVisible();
+  await waiting.getByRole('button', { name: 'Regenerate' }).click();
   await expect(page.getByRole('img', { name: 'Layout of WH18-1-A' })).toBeVisible();
   expect(Object.keys(await downloadZip(page)).filter((n) => n.endsWith('.side-a.dxf'))).toEqual([
     'WH18-1-A.side-a.dxf',

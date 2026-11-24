@@ -4,8 +4,9 @@
 // Job document (job-store/document.ts).
 //
 // Locked Boards and Blanks (those with a Part ticked Cut, so derived from the Job's progress) survive every
-// re-plan here: `regenerate`, the Saw / CNC toggle and Sheet code edits pass the stored Plan and the Cut
-// Part ids to the Planner, which keeps Locked Blanks exactly as they are and Locked Boards' Breakdowns.
+// re-plan here: `regenerate` and `addBoards` pass the stored Plan and the Cut Part ids to the Planner, which
+// keeps Locked Blanks exactly as they are and Locked Boards' Breakdowns. The Saw / CNC toggle and Sheet code
+// edits only record the choice; the next Regenerate applies it.
 import type { Model } from './model.ts';
 import {
   blankLocked,
@@ -135,8 +136,9 @@ export function setOffcutDiscarded(job: Job, offcutId: string, discarded: boolea
 }
 
 /**
- * Sets a Part's Saw / CNC toggle and re-plans with the Job's own snapshot, keeping Locked Boards. Choosing
- * the Part's automatic mode removes the stored choice. A Part bigger than the usable bed, on a Locked
+ * Sets a Part's Saw / CNC toggle. Nothing is re-planned: Regenerate is the only place where Blanks, Boards
+ * and Offcuts change (PRD 3.5, 11.5), and it applies the choice (`pendingChoices`). Choosing the Part's
+ * automatic mode removes the stored choice. A Part bigger than the usable bed, on a Locked
  * Blank or a Saw Part of a Locked Board can't be toggled.
  */
 export function setPartMode(
@@ -158,7 +160,47 @@ export function setPartMode(
   }
   const sawCnc = Object.fromEntries(Object.entries(job.sawCnc).filter(([id]) => id !== partId));
   if (mode !== rule.auto) sawCnc[partId] = mode;
-  return { job: planJob(job.model, job.settings, job.sheetCodes, sawCnc, job.plan, progress) };
+  return { job: { ...job, sawCnc } };
+}
+
+/** The Saw / CNC mode chosen for a Part (what the next Regenerate plans it as); null for an unknown Part. */
+export function partMode(job: Pick<Job, 'model' | 'settings' | 'sawCnc'>, partId: string): PartMode | null {
+  const rule = partRule(job.model, job.settings, partId);
+  if (!rule) return null;
+  return rule.oversize ? 'saw' : (job.sawCnc[partId] ?? rule.auto);
+}
+
+/** The Job's own choices the Plan doesn't show yet: they take effect at the next Regenerate. */
+export interface PendingChoices {
+  /** Parts whose Saw / CNC choice differs from how the Plan cuts them (Locked ones left out), export order. */
+  partModes: string[];
+  /** Sheets whose code differs from the one the Plan's Blank ids carry, Run order. */
+  sheetCodes: string[];
+}
+
+export function pendingChoices(job: Job, progress: Progress): PendingChoices {
+  const isCut = (id: string) => progress[id]?.cut !== undefined;
+  const fixed = new Set<string>();
+  const inPlan = new Set<string>();
+  for (const sheet of job.plan.sheets) {
+    for (const id of [...sheet.unplaced, ...(sheet.overflow ?? [])]) inPlan.add(id);
+    for (const board of sheet.boards) {
+      const locked = boardLocked(board, isCut);
+      for (const p of board.sawParts.filter(isLive)) (locked ? fixed : inPlan).add(p.partId);
+      for (const blank of board.blanks) {
+        const target = locked && blankLocked(blank, isCut) ? fixed : inPlan;
+        for (const p of blank.parts.filter(isLive)) target.add(p.partId);
+      }
+    }
+  }
+  const sawInPlan = new Set(job.plan.sheets.flatMap((s) => s.sawParts));
+  return {
+    partModes: job.model.parts
+      .filter((p) => inPlan.has(p.id) && !fixed.has(p.id))
+      .filter((p) => partMode(job, p.id) !== (sawInPlan.has(p.id) ? 'saw' : 'cnc'))
+      .map((p) => p.id),
+    sheetCodes: job.plan.sheets.filter((s) => s.code !== sheetCode(job, s.sheetId)).map((s) => s.sheetId),
+  };
 }
 
 /** The settings fields where the Job's snapshot differs from the current global settings. */
@@ -174,8 +216,8 @@ export function sheetCode(job: Job, sheetId: string): string {
 export const MAX_SHEET_CODE_LENGTH = 12;
 
 /**
- * Edits a Sheet code and re-plans with the Job's own snapshot (a code is Job data, not a setting).
- * The code is trimmed and uppercased; an empty code, or the derived one, goes back to the derived code.
+ * Edits a Sheet code (Job data, not a setting). Like the Saw / CNC toggle it re-plans nothing: the next
+ * Regenerate gives the Sheet's Blanks the new code. The code is trimmed and uppercased; an empty code, or the derived one, goes back to the derived code.
  * A Sheet with Locked Boards keeps its code, because Locked Blanks keep their ids forever.
  */
 export function setSheetCode(
@@ -202,7 +244,7 @@ export function setSheetCode(
 
   const sheetCodes = Object.fromEntries(Object.entries(job.sheetCodes).filter(([id]) => id !== sheetId));
   if (code !== '' && code !== sheet.code) sheetCodes[sheetId] = code;
-  return { job: planJob(job.model, job.settings, sheetCodes, job.sawCnc, job.plan, progress) };
+  return { job: { ...job, sheetCodes } };
 }
 
 function withSheetCodes(model: Model, codes: Record<string, string>): Model {

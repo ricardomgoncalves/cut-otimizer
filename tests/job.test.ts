@@ -7,6 +7,8 @@ import {
   generateJob,
   lockedBoards,
   needsNesting,
+  partMode,
+  pendingChoices,
   regenerate,
   remake,
   setOffcutDiscarded,
@@ -69,28 +71,24 @@ describe('Sheet codes', () => {
     expect(job.sheetCodes).toEqual({});
   });
 
-  it('show an edited code in Blank ids and DXF file names', () => {
+  it('change nothing in the Plan until Regenerate, which shows them in Blank ids and DXF file names', () => {
     const model = syntheticModel();
-    const result = setSheetCode(generateJob(model, DEFAULT_SETTINGS), W18(model), ' wh18 ');
+    const job = generateJob(model, DEFAULT_SETTINGS);
+    const result = setSheetCode(job, W18(model), ' wh18 ');
     if ('error' in result) throw new Error(result.error);
 
     expect(sheetCode(result.job, W18(model))).toBe('WH18');
-    expect(blankIds(result.job)).toEqual(['WH18-1-A', 'O16-1-A']);
-    expect([...toDxfFiles(result.job.plan, 'J1').keys()]).toEqual([
+    expect(result.job.plan).toBe(job.plan);
+    expect(pendingChoices(result.job, {})).toEqual({ partModes: [], sheetCodes: [W18(model)] });
+
+    const regenerated = regenerate(result.job, DEFAULT_SETTINGS);
+    expect(blankIds(regenerated)).toEqual(['WH18-1-A', 'O16-1-A']);
+    expect([...toDxfFiles(regenerated.plan, 'J1').keys()]).toEqual([
       'WH18-1-A.side-a.dxf',
       'O16-1-A.side-a.dxf',
       'J1-B1.side-b.dxf',
     ]);
-  });
-
-  it('re-plan with the snapshot, not with newer global settings', () => {
-    const model = syntheticModel();
-    const job = generateJob(model, DEFAULT_SETTINGS);
-    const result = setSheetCode(job, O16(model), 'OAK16');
-    if ('error' in result) throw new Error(result.error);
-
-    expect(result.job.settings).toEqual(DEFAULT_SETTINGS);
-    expect(blankIds(result.job)).toEqual(['W18-1-A', 'OAK16-1-A']);
+    expect(pendingChoices(regenerated, {})).toEqual({ partModes: [], sheetCodes: [] });
   });
 
   it('go back to the derived code when cleared', () => {
@@ -101,7 +99,7 @@ describe('Sheet codes', () => {
     if ('error' in cleared) throw new Error(cleared.error);
 
     expect(cleared.job.sheetCodes).toEqual({});
-    expect(blankIds(cleared.job)).toEqual(['W18-1-A', 'O16-1-A']);
+    expect(pendingChoices(cleared.job, {}).sheetCodes).toEqual([]);
   });
 
   it('carry over when the Job is regenerated', () => {
@@ -134,24 +132,31 @@ describe('Saw / CNC toggle', () => {
       .flatMap((s) => s.boards.flatMap((b) => b.blanks))
       .find((b) => b.parts.some((p) => p.partId === rail))?.id;
 
-  it('sends the narrow op-less Part back to the CNC, where it is nested, and back to the saw', () => {
+  it('records the choice; Regenerate sends the narrow op-less Part to the CNC, and back to the saw', () => {
     const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
     expect(job.plan.sheets[0]?.sawParts).toContain(rail);
+    expect(partMode(job, rail)).toBe('saw');
 
     const cnc = setPartMode(job, rail, 'cnc');
     if ('error' in cnc) throw new Error(cnc.error);
     expect(cnc.job.sawCnc).toEqual({ [rail]: 'cnc' });
-    expect(cnc.job.plan.sheets[0]?.sawParts).not.toContain(rail);
-    expect(railBlank(cnc.job)).toMatch(/^W18-1-/);
+    expect(partMode(cnc.job, rail)).toBe('cnc');
+    expect(cnc.job.plan).toBe(job.plan);
+    expect(pendingChoices(cnc.job, {})).toEqual({ partModes: [rail], sheetCodes: [] });
+
+    const nested = regenerate(cnc.job, DEFAULT_SETTINGS);
+    expect(nested.plan.sheets[0]?.sawParts).not.toContain(rail);
+    expect(railBlank(nested)).toMatch(/^W18-1-/);
+    expect(pendingChoices(nested, {}).partModes).toEqual([]);
 
     // Back to its automatic mode: no choice stored.
-    const saw = setPartMode(cnc.job, rail, 'saw');
+    const saw = setPartMode(nested, rail, 'saw');
     if ('error' in saw) throw new Error(saw.error);
     expect(saw.job.sawCnc).toEqual({});
-    expect(saw.job.plan.sheets[0]?.sawParts).toContain(rail);
+    expect(regenerate(saw.job, DEFAULT_SETTINGS).plan.sheets[0]?.sawParts).toContain(rail);
   });
 
-  it('re-plans with the snapshot and keeps the choice on regenerate', () => {
+  it('keeps the choice on regenerate', () => {
     const job = generateJob(syntheticModel(), { ...DEFAULT_SETTINGS, clampMargin: 30000 });
     const cnc = setPartMode(job, rail, 'cnc');
     if ('error' in cnc) throw new Error(cnc.error);
@@ -203,8 +208,9 @@ describe('Locked Boards and Blanks on regenerate', () => {
 
     const toe = setPartMode(job, 'w1.left.lower.c1/toeKick/0', 'saw', shelfCut);
     if ('error' in toe) throw new Error(toe.error);
-    expect(toe.job.plan.sheets[0]?.boards).toEqual(job.plan.sheets[0]?.boards);
-    expect(toe.job.plan.sheets[1]?.sawParts).toEqual(['w1.left.lower.c1/toeKick/0']);
+    const regenerated = regenerate(toe.job, DEFAULT_SETTINGS, shelfCut);
+    expect(regenerated.plan.sheets[0]?.boards).toEqual(job.plan.sheets[0]?.boards);
+    expect(regenerated.plan.sheets[1]?.sawParts).toEqual(['w1.left.lower.c1/toeKick/0']);
   });
 
   it('lets a Part on an uncut Blank of a Locked Board switch, and refuses one on a Locked Blank', () => {

@@ -214,6 +214,14 @@ export function withJob(doc: JobDocument, job: Job, now: string): JobDocument {
   };
 }
 
+/**
+ * Stores the Job's Saw / CNC choices and Sheet codes without re-planning: the Plan, its stale flag and
+ * "Revert last re-import" stay until the next Regenerate.
+ */
+export function withChoices(doc: JobDocument, job: Pick<Job, 'sheetCodes' | 'sawCnc'>, now: string): JobDocument {
+  return { ...doc, sheetCodes: job.sheetCodes, sawCncOverrides: job.sawCnc, updatedAt: now };
+}
+
 /** Stores the Job's ticks. */
 export function withProgress(doc: JobDocument, progress: Progress, now: string): JobDocument {
   return { ...doc, progress, updatedAt: now };

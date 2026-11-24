@@ -48,6 +48,13 @@ test('the narrow op-less Part is a Saw Part, and toggling it to CNC nests it wit
 
   await rail.getByRole('checkbox', { name: 'Saw' }).uncheck();
 
+  // Only Regenerate changes the Plan.
+  const waiting = page.getByRole('status', { name: 'Changes wait for Regenerate' });
+  await expect(waiting).toContainText('T1 · Rail to the CNC');
+  await expect(rail).toContainText('Saw · Board 1');
+  await waiting.getByRole('button', { name: 'Regenerate' }).click();
+  await expect(waiting).toHaveCount(0);
+
   await expect(rail).toContainText(/W18-1-[A-Z] #\d/);
   await expect(rail).toContainText('narrow: check tabs');
   // The Layout view marks it too.
