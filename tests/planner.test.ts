@@ -449,9 +449,11 @@ function randomModel(seed: number, count: number): Model {
     top: [],
     bottom: [],
     manualOps: [],
+    edges: {},
   }));
   return {
     projectName: 'Random',
+    edgebands: [],
     sheets: [
       {
         id: 's1',

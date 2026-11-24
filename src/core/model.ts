@@ -60,6 +60,8 @@ export interface Part {
   cutWidth: number;
   /** `length`: the Part's X must follow the Board length. `none`: may rotate. */
   grain: 'length' | 'none';
+  /** Banded edges of the cut piece -> Edgeband id (`x0`/`xL` run along Y, `y0`/`yW` along X). Missing = unbanded. */
+  edges: Partial<Record<PartEdge, string>>;
   /** `top`-face ops, moved from the finished frame into the cut frame. */
   top: CncOp[];
   /**
@@ -70,6 +72,17 @@ export interface Part {
   bottom: CncOp[];
   /** Ops no file can carry: edge-face ops and ops the DXF grammar can't draw. Done by hand. */
   manualOps: ManualOp[];
+}
+
+/** An edge of a Part: `x0`/`xL` at the ends of its X, `y0`/`yW` at the ends of its Y. */
+export type PartEdge = 'x0' | 'xL' | 'y0' | 'yW';
+
+/** An Edgeband from the export's library. */
+export interface Edgeband {
+  id: string;
+  name: string;
+  thickness: number;
+  width: number;
 }
 
 /** A Part face, as the export names it. */
@@ -95,6 +108,8 @@ export interface Model {
   projectName: string;
   /** In export order (by id, shortest first). */
   sheets: Sheet[];
+  /** In export order. */
+  edgebands: Edgeband[];
   /** Cabinets, then Generated Items, in export order. */
   owners: Owner[];
   /** In export order. */
