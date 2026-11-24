@@ -33,6 +33,12 @@ Create a GitHub issue.
 
 Run `gh issue view <number> --comments`.
 
+Before working the ticket, also read [`docs/architecture.md`](../architecture.md). It records the module layout, interfaces, seams and conventions, one section per ticket. Later sections can supersede earlier ones, and the "Review fixes" section near the end gives the latest shape. For tickets that touch the Parts Export, also read [`docs/parts-export.md`](../parts-export.md).
+
+## When closing a ticket
+
+If the work added or changed a module, interface or convention, add a section for that ticket to `docs/architecture.md` in the same change. Then close the issue with `gh issue close <number> --comment "..."`.
+
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
