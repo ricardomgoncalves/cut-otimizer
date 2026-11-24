@@ -32,12 +32,23 @@ One physical full-size board of a Sheet, numbered within its Sheet ("White melam
 _Avoid_: sheet, panel
 
 **Breakdown**:
-The saw plan that cuts Boards into Blanks.
+The saw plan that cuts each Board, by guillotine cuts, into Blanks, Saw Parts and Offcuts.
 _Avoid_: pre-cut plan, rip plan
 
 **Blank**:
-A piece cut from a Board that fits the bed, onto which Parts are nested.
+A piece cut from a Board, no larger than the bed, onto which Parts are nested. Always loaded with its Board's length along the bed's X. Identified as Sheet code, Board number, letter (`W18-1-A`).
 _Avoid_: sub-sheet, tile, offcut
+
+**Sheet code**:
+A short code for a Sheet, derived from its material and thickness and editable (`W18` for White melamine 18). Used in Blank ids.
+
+**Saw Part**:
+A Part cut straight from a Board in the Breakdown rather than on the CNC. A Part bigger than the usable bed is always a Saw Part; a Part without ops may be made one by hand.
+_Avoid_: manual part
+
+**Offcut**:
+A piece of a Board left over after the Breakdown, being neither a Blank nor a Saw Part.
+_Avoid_: scrap, remnant
 
 **Layout**:
 The arrangement of Parts on one Blank.
@@ -60,7 +71,7 @@ The square stop fixed to the bed that a Flip Part is pushed into for Side B. It 
 _Avoid_: jig, registration
 
 **Machine settings**:
-Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter and kerf. A Job keeps a snapshot of them from when its Layouts were generated.
+Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf and edge trim. A Job keeps a snapshot of them from when its Layouts were generated.
 _Avoid_: profile, config
 
 **Locked**:
