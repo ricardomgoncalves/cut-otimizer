@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { toDxfFiles } from '../src/core/dxf/index.ts';
 import { importExport } from '../src/core/import/index.ts';
-import { generateJob, regenerate, setSheetCode, sheetCode, snapshotChanges } from '../src/core/job.ts';
+import { generateJob, regenerate, setPartMode, setSheetCode, sheetCode, snapshotChanges } from '../src/core/job.ts';
 import type { Model } from '../src/core/model.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
 
@@ -106,5 +106,45 @@ describe('Sheet codes', () => {
     const model = syntheticModel();
     const job = generateJob(model, DEFAULT_SETTINGS);
     expect(setSheetCode(job, W18(model), code)).toEqual({ error });
+  });
+});
+
+describe('Saw / CNC toggle', () => {
+  const rail = 'c1/s0.rail[1]';
+  const railBlank = (job: ReturnType<typeof generateJob>) =>
+    job.plan.sheets
+      .flatMap((s) => s.boards.flatMap((b) => b.blanks))
+      .find((b) => b.parts.some((p) => p.partId === rail))?.id;
+
+  it('sends the narrow op-less Part back to the CNC, where it is nested, and back to the saw', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    expect(job.plan.sheets[0]?.sawParts).toContain(rail);
+
+    const cnc = setPartMode(job, rail, 'cnc');
+    if ('error' in cnc) throw new Error(cnc.error);
+    expect(cnc.job.sawCnc).toEqual({ [rail]: 'cnc' });
+    expect(cnc.job.plan.sheets[0]?.sawParts).not.toContain(rail);
+    expect(railBlank(cnc.job)).toMatch(/^W18-1-/);
+
+    // Back to its automatic mode: no choice stored.
+    const saw = setPartMode(cnc.job, rail, 'saw');
+    if ('error' in saw) throw new Error(saw.error);
+    expect(saw.job.sawCnc).toEqual({});
+    expect(saw.job.plan.sheets[0]?.sawParts).toContain(rail);
+  });
+
+  it('re-plans with the snapshot and keeps the choice on regenerate', () => {
+    const job = generateJob(syntheticModel(), { ...DEFAULT_SETTINGS, clampMargin: 30000 });
+    const cnc = setPartMode(job, rail, 'cnc');
+    if ('error' in cnc) throw new Error(cnc.error);
+    expect(cnc.job.settings.clampMargin).toBe(30000);
+    expect(regenerate(cnc.job, DEFAULT_SETTINGS).sawCnc).toEqual({ [rail]: 'cnc' });
+  });
+
+  it('is not available for a Part bigger than the bed', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    expect(setPartMode(job, 'c1/leftSide', 'cnc')).toEqual({
+      error: 'This Part is bigger than the usable bed, so it is always cut on the saw.',
+    });
   });
 });

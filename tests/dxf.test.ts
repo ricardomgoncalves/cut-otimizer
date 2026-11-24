@@ -20,11 +20,16 @@ const handPlan: Plan = {
       code: 'W18',
       thickness: mm(18),
       sawParts: [],
+      sawReasons: {},
+      unplaced: [],
       boards: [
         {
           number: 1,
           length: mm(2800),
           width: mm(2070),
+          sawParts: [],
+          offcuts: [],
+          cuts: [],
           blanks: [
             {
               id: 'W18-1-A',
@@ -42,6 +47,7 @@ const handPlan: Plan = {
                   rotated: false,
                   cutLength: mm(200),
                   cutWidth: mm(100),
+                  narrow: false,
                   ops: [
                     // Ø4.45 rounds to the 4.5 layer.
                     { kind: 'drill', at: { x: mm(50), y: mm(50) }, diameter: 4450, depth: mm(12.5) },
@@ -71,6 +77,7 @@ const handPlan: Plan = {
                   rotated: true,
                   cutLength: mm(100),
                   cutWidth: mm(50),
+                  narrow: false,
                   ops: [
                     { kind: 'drill', at: { x: mm(10), y: mm(5) }, diameter: mm(8), depth: mm(10) },
                     {

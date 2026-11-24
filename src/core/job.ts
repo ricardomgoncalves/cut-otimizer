@@ -1,8 +1,8 @@
-// The Job: a model, the Machine settings snapshot it was generated with, its Sheet code edits and the
-// Plan made from them. Everything a Job's files come from lives here, so changing the global settings
+// The Job: a model, the Machine settings snapshot it was generated with, its Sheet code edits, its
+// per-Part Saw / CNC choices and the Plan made from them. Everything a Job's files come from lives here, so changing the global settings
 // changes nothing until the Job is regenerated. (The Job store and its document format are ticket #29.)
 import type { Model } from './model.ts';
-import { plan, type Plan } from './planner/index.ts';
+import { partRule, plan, type PartMode, type Plan } from './planner/index.ts';
 import { settingsChanges, type Settings } from './settings.ts';
 
 export interface Job {
@@ -11,23 +11,49 @@ export interface Job {
   settings: Settings;
   /** Edited Sheet codes, by Sheet id. A Sheet not listed uses its derived code (`model.sheets[].code`). */
   sheetCodes: Record<string, string>;
-  /** Made from `model`, `settings` and `sheetCodes`. */
+  /** The Saw / CNC toggle, by Part id. Only choices that differ from the automatic rule are kept. */
+  sawCnc: Record<string, PartMode>;
+  /** Made from `model`, `settings`, `sheetCodes` and `sawCnc`. */
   plan: Plan;
 }
 
 /** Plans a model with a snapshot of `settings`. */
-export function generateJob(model: Model, settings: Settings, sheetCodes: Record<string, string> = {}): Job {
+export function generateJob(
+  model: Model,
+  settings: Settings,
+  sheetCodes: Record<string, string> = {},
+  sawCnc: Record<string, PartMode> = {},
+): Job {
   const snapshot: Settings = {
     ...settings,
     edgeTrimBySheet: { ...settings.edgeTrimBySheet },
     manualBottomOpKinds: [...settings.manualBottomOpKinds],
   };
-  return { model, settings: snapshot, sheetCodes, plan: plan(withSheetCodes(model, sheetCodes), snapshot) };
+  return {
+    model,
+    settings: snapshot,
+    sheetCodes,
+    sawCnc,
+    plan: plan(withSheetCodes(model, sheetCodes), snapshot, { sawCnc }),
+  };
 }
 
 /** Re-plans the Job with the current global settings, which become its new snapshot. */
 export function regenerate(job: Job, settings: Settings): Job {
-  return generateJob(job.model, settings, job.sheetCodes);
+  return generateJob(job.model, settings, job.sheetCodes, job.sawCnc);
+}
+
+/**
+ * Sets a Part's Saw / CNC toggle and re-plans with the Job's own snapshot. Choosing the Part's
+ * automatic mode removes the stored choice. A Part bigger than the usable bed can't be toggled.
+ */
+export function setPartMode(job: Job, partId: string, mode: PartMode): { job: Job } | { error: string } {
+  const rule = partRule(job.model, job.settings, partId);
+  if (!rule) return { error: `There is no Part ${partId} in this Job.` };
+  if (rule.oversize) return { error: 'This Part is bigger than the usable bed, so it is always cut on the saw.' };
+  const sawCnc = Object.fromEntries(Object.entries(job.sawCnc).filter(([id]) => id !== partId));
+  if (mode !== rule.auto) sawCnc[partId] = mode;
+  return { job: generateJob(job.model, job.settings, job.sheetCodes, sawCnc) };
 }
 
 /** The settings fields where the Job's snapshot differs from the current global settings. */
@@ -62,7 +88,7 @@ export function setSheetCode(job: Job, sheetId: string, input: string): { job: J
 
   const sheetCodes = Object.fromEntries(Object.entries(job.sheetCodes).filter(([id]) => id !== sheetId));
   if (code !== '' && code !== sheet.code) sheetCodes[sheetId] = code;
-  return { job: generateJob(job.model, job.settings, sheetCodes) };
+  return { job: generateJob(job.model, job.settings, sheetCodes, job.sawCnc) };
 }
 
 function withSheetCodes(model: Model, codes: Record<string, string>): Model {
