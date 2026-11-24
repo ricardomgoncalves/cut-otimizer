@@ -38,6 +38,7 @@ import { isLive, type PartMode, type SawReason, type SheetPlan, type SideBFile }
 import {
   apply,
   boardId,
+  isCut,
   isDone,
   reprintSelection,
   rollup,
@@ -869,7 +870,7 @@ export function App() {
               />
               <h4>Breakdown</h4>
               {sheet.boards.map((board) => {
-                const sawLeft = board.sawParts.filter((p) => isLive(p) && progress[p.partId]?.cut === undefined).length;
+                const sawLeft = board.sawParts.filter((p) => isLive(p) && !isCut(progress, p.partId)).length;
                 return (
                   <div key={board.number}>
                     <BoardBreakdown code={sheet.code} board={board} nameOf={nameOf} onDiscard={onDiscard} />
@@ -1128,7 +1129,7 @@ function PartList(props: {
                   ) : (
                     at?.text
                   )}
-                  {at && progress[p.id]?.cut !== undefined && (
+                  {at && isCut(progress, p.id) && (
                     <>
                       {' '}
                       <button

@@ -21,7 +21,7 @@ import {
   type PartMode,
   type Plan,
 } from './planner/index.ts';
-import { boardId, type Progress } from './progress.ts';
+import { boardId, isCut, type Progress } from './progress.ts';
 import { settingsChanges, type Settings } from './settings.ts';
 
 export interface Job {
@@ -60,7 +60,7 @@ function planJob(
     edgeTrimBySheet: { ...settings.edgeTrimBySheet },
     manualBottomOpKinds: [...settings.manualBottomOpKinds],
   };
-  const cut = Object.keys(progress).filter((id) => progress[id]?.cut !== undefined);
+  const cut = Object.keys(progress).filter((id) => isCut(progress, id));
   return {
     model,
     settings: snapshot,
@@ -96,10 +96,9 @@ export function addBoards(job: Job, sheetIds: readonly string[], progress: Progr
  * their ids (`W18-1`).
  */
 export function lockedBoards(job: Pick<Job, 'plan'>, progress: Progress): { id: string; sheetId: string; board: Board }[] {
-  const isCut = (id: string) => progress[id]?.cut !== undefined;
   return job.plan.sheets.flatMap((sheet) =>
     sheet.boards
-      .filter((b) => boardLocked(b, isCut))
+      .filter((b) => boardLocked(b, (id) => isCut(progress, id)))
       .map((board) => ({ id: boardId(sheet, board), sheetId: sheet.sheetId, board })),
   );
 }
@@ -111,7 +110,7 @@ export function lockedBoards(job: Pick<Job, 'plan'>, progress: Progress): { id: 
 export function remake(job: Job, progress: Progress, partId: string): { job: Job; progress: Progress } | { error: string } {
   if (!job.model.parts.some((p) => p.id === partId)) return { error: `There is no Part ${partId} in this Job.` };
   const onBoard = job.plan.sheets.some((s) => s.boards.some((b) => livePartIds(b).includes(partId)));
-  if (progress[partId]?.cut === undefined || !onBoard) return { error: 'Only a Part already cut can be remade.' };
+  if (!isCut(progress, partId) || !onBoard) return { error: 'Only a Part already cut can be remade.' };
   return {
     job: { ...job, plan: remakePart(job.plan, partId) },
     progress: Object.fromEntries(Object.entries(progress).filter(([id]) => id !== partId)),
@@ -150,12 +149,12 @@ export function setPartMode(
   const rule = partRule(job.model, job.settings, partId);
   if (!rule) return { error: `There is no Part ${partId} in this Job.` };
   if (rule.oversize) return { error: 'This Part is bigger than the usable bed, so it is always cut on the saw.' };
-  const isCut = (id: string) => progress[id]?.cut !== undefined;
+  const cut = (id: string) => isCut(progress, id);
   for (const { id, board } of lockedBoards(job, progress)) {
     if (board.sawParts.some((p) => isLive(p) && p.partId === partId)) {
       return { error: `This Part is on Locked Board ${id}, so it stays where it is.` };
     }
-    const blank = board.blanks.find((b) => blankLocked(b, isCut) && b.parts.some((p) => isLive(p) && p.partId === partId));
+    const blank = board.blanks.find((b) => blankLocked(b, cut) && b.parts.some((p) => isLive(p) && p.partId === partId));
     if (blank) return { error: `This Part is on Locked Blank ${blank.id}, so it stays where it is.` };
   }
   const sawCnc = Object.fromEntries(Object.entries(job.sawCnc).filter(([id]) => id !== partId));
@@ -179,16 +178,16 @@ export interface PendingChoices {
 }
 
 export function pendingChoices(job: Job, progress: Progress): PendingChoices {
-  const isCut = (id: string) => progress[id]?.cut !== undefined;
+  const cut = (id: string) => isCut(progress, id);
   const fixed = new Set<string>();
   const inPlan = new Set<string>();
   for (const sheet of job.plan.sheets) {
     for (const id of [...sheet.unplaced, ...(sheet.overflow ?? [])]) inPlan.add(id);
     for (const board of sheet.boards) {
-      const locked = boardLocked(board, isCut);
+      const locked = boardLocked(board, cut);
       for (const p of board.sawParts.filter(isLive)) (locked ? fixed : inPlan).add(p.partId);
       for (const blank of board.blanks) {
-        const target = locked && blankLocked(blank, isCut) ? fixed : inPlan;
+        const target = locked && blankLocked(blank, cut) ? fixed : inPlan;
         for (const p of blank.parts.filter(isLive)) target.add(p.partId);
       }
     }

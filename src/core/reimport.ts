@@ -27,7 +27,7 @@ import {
   type SawPlacement,
   type VoidReason,
 } from './planner/index.ts';
-import { boardId, type PartTicks, type Progress, type Step } from './progress.ts';
+import { boardId, isCut, type PartTicks, type Progress, type Step } from './progress.ts';
 
 export type Category = 'same' | 'renamed' | 'changedCut' | 'changedFinishing' | 'added' | 'removed';
 
@@ -182,7 +182,7 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
   }
 
   const where = locations(job.plan);
-  const isCut = (oldId: string) => job.progress?.[oldId]?.cut !== undefined;
+  const cutBefore = (oldId: string) => isCut(job.progress, oldId);
   const fixByHand = new Set(choices.fixByHand ?? []);
   const ownerLabel = (owners: Map<string, Owner>, p: Part) => owners.get(p.ownerId)?.label ?? p.ownerId;
   const entries: DiffEntry[] = [];
@@ -207,9 +207,9 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
       ownerLabel: ownerLabel(newOwners, p),
       ...withWhere(where.get(before.id)),
       changes,
-      ...treatmentOf(category, isCut(before.id), fixByHand.has(p.id)),
+      ...treatmentOf(category, cutBefore(before.id), fixByHand.has(p.id)),
       ...(category === 'changedFinishing' ? { flags: flagsOf(changes, job.progress?.[before.id]) } : {}),
-      ...(category === 'changedCut' && isCut(before.id) ? { fixText: describeChange(before, p, old, next) } : {}),
+      ...(category === 'changedCut' && cutBefore(before.id) ? { fixText: describeChange(before, p, old, next) } : {}),
     });
   }
   const matchedOld = new Set([...match.values()].map((m) => m.part.id));
@@ -223,7 +223,7 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
       ownerLabel: ownerLabel(oldOwners, p),
       ...withWhere(where.get(p.id)),
       changes: [],
-      treatment: isCut(p.id) ? 'spare' : 'drop',
+      treatment: cutBefore(p.id) ? 'spare' : 'drop',
     });
   }
   entries.sort((a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category));
@@ -263,7 +263,7 @@ export function diff(job: DiffJob, next: Model, choices: DiffChoices = {}): Diff
  * The Parts a re-import leaves to nest at the next Regenerate, by new id: Added and Changed (cut), except
  * those fixed by hand.
  */
-export function needsNesting(d: Diff): string[] {
+function diffNestTargets(d: Diff): string[] {
   return d.entries.flatMap((e) =>
     (e.category === 'added' || e.category === 'changedCut') && e.treatment !== 'fixByHand' && e.newId !== undefined
       ? [e.newId]
@@ -331,7 +331,7 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
     Object.entries(renameKeys(doc.sawCncOverrides, renames)).filter(([id]) => live.has(id)),
   );
   const carried = (doc.stale?.needsNesting ?? []).map((id) => renames[id] ?? id).filter((id) => live.has(id));
-  const nesting = needsNesting(d);
+  const nesting = diffNestTargets(d);
 
   const oldParts = new Map(current.parts.map((p) => [p.id, p]));
   const oldWhere = locations(doc.plan);
@@ -376,7 +376,7 @@ export function applyReimport(doc: JobDocument, current: Model, next: NextExport
     }
   }
   if (plan) {
-    const cut = (id: string) => progress[id]?.cut !== undefined;
+    const cut = (id: string) => isCut(progress, id);
     plan = withSteps(vacatePlan(plan, vacate, cut), withHandFixes(next.model, handFixes));
   }
 
@@ -451,7 +451,7 @@ function spareOf(part: Part, where: string | undefined, at: string): Spare {
  * Takes Parts off the stale Plan. On a Locked Blank (a Saw Part: on a Locked Board) the placement stays as
  * a greyed void, so nothing there is redrawn; anywhere else it goes, so the next Regenerate nests it.
  */
-function vacatePlan(plan: Plan, vacate: ReadonlyMap<string, VoidReason>, isCut: (id: string) => boolean): Plan {
+function vacatePlan(plan: Plan, vacate: ReadonlyMap<string, VoidReason>, cut: (id: string) => boolean): Plan {
   if (vacate.size === 0) return plan;
   const mark = <T extends Placement | SawPlacement>(list: readonly T[], keep: boolean): T[] =>
     list.flatMap((p) => {
@@ -464,12 +464,12 @@ function vacatePlan(plan: Plan, vacate: ReadonlyMap<string, VoidReason>, isCut: 
     sheets: plan.sheets.map((sheet) => ({
       ...sheet,
       boards: sheet.boards.map((board) => {
-        const locked = boardLocked(board, isCut);
+        const locked = boardLocked(board, cut);
         return {
           ...board,
           blanks: board.blanks.map((blank) => ({
             ...blank,
-            parts: mark(blank.parts, locked && blankLocked(blank, isCut)),
+            parts: mark(blank.parts, locked && blankLocked(blank, cut)),
           })),
           sawParts: mark(board.sawParts, locked),
         };

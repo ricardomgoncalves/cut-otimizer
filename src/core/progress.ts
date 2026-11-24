@@ -95,7 +95,10 @@ export function isDone(job: JobView, progress: Progress, partId: string): boolea
   return applicable.length > 0 && applicable.every((s) => ticks?.[s] !== undefined);
 }
 
-const isCut = (progress: Progress, partId: string) => progress[partId]?.cut !== undefined;
+/** Whether the Part is ticked Cut: what Locks its Blank and Board. */
+export function isCut(progress: Progress | undefined, partId: string): boolean {
+  return progress?.[partId]?.cut !== undefined;
+}
 
 export interface BlankProgress {
   id: string;
