@@ -15,6 +15,7 @@
     "check": "bun run typecheck && bun run lint && bun run test && bun run build && bun run e2e"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

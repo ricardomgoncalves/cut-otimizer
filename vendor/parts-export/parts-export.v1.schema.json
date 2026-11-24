@@ -1,0 +1,572 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ricardomgoncalves/cabinet-planner/main/docs/parts-export/parts-export.v1.schema.json",
+  "title": "PartsExport",
+  "description": "Parts Export schema v1: every Part to be cut from one cabinet-planner Project, with sizes, Material, banding, position and machining, for a separate optimiser/CAM app. Lengths are integer micrometres everywhere. Read parts-export.v1.guide.md for the rules JSON Schema cannot express.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schemaVersion",
+    "units",
+    "exportedAt",
+    "generator",
+    "project",
+    "library",
+    "materials",
+    "rooms",
+    "cabinets",
+    "generatedItems",
+    "parts",
+    "skipped"
+  ],
+  "properties": {
+    "format": { "const": "cabinet-planner/parts-export" },
+    "schemaVersion": { "$ref": "#/$defs/SchemaVersion" },
+    "units": {
+      "description": "Every length in this file is an integer number of micrometres (19.6 mm is 19600).",
+      "const": "um"
+    },
+    "exportedAt": {
+      "description": "When the file was written, UTC, RFC 3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 60 }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "library": {
+      "description": "The Library the Project's Cabinets were evaluated against.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/LibraryId" },
+        "name": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "materials": {
+      "description": "Only the Sheets and Edgebands some Part uses, copied from the Library's Catalogue. Sorted by id as the Library sorts ids.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sheets", "edgebands"],
+      "properties": {
+        "sheets": { "type": "array", "items": { "$ref": "#/$defs/Sheet" } },
+        "edgebands": { "type": "array", "items": { "$ref": "#/$defs/Edgeband" } }
+      }
+    },
+    "rooms": {
+      "description": "Every Room that owns at least one exported or skipped Cabinet or Generated Item, in Project order.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/Room" }
+    },
+    "cabinets": {
+      "description": "Every Cabinet that owns at least one exported Part.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/Cabinet" }
+    },
+    "generatedItems": {
+      "description": "Every Generated Item segment that owns at least one exported Part. A Generated Item that follows a Run Chain round a Corner is one entry per Wall Face, sharing `chain`.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/GeneratedItem" }
+    },
+    "parts": {
+      "description": "One entry per physical piece to cut. There is no quantity: identical pieces are separate entries.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/Part" }
+    },
+    "skipped": {
+      "description": "Cabinets and Generated Items the user chose to export without. Empty when the job is complete.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/Skipped" }
+    }
+  },
+  "$defs": {
+    "SchemaVersion": {
+      "description": "Semver version of the Parts Export format this file conforms to. This schema accepts major version 1 only.",
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "LibraryId": {
+      "description": "A Library id: a 64-bit snowflake written as a decimal string. Opaque.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,19}$"
+    },
+    "Id": {
+      "description": "A planner id (Room, Wall, Cabinet, Generated Item or Part). Opaque: never parse it. Unique within its table in one file.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "Length": {
+      "description": "A length or position in integer micrometres.",
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "Size": {
+      "description": "A strictly positive length in integer micrometres.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "Point3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "$ref": "#/$defs/Length" },
+        "y": { "$ref": "#/$defs/Length" },
+        "z": { "$ref": "#/$defs/Length" }
+      }
+    },
+    "Axis": {
+      "description": "A signed axis of the owner's frame.",
+      "enum": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+    },
+    "Face": {
+      "description": "A face of a Part, named by its local axis as in the Library: `top`/`bottom` (normal ±Z), `x0`/`xL` the ends (normal −X/+X), `y0`/`yW` the long edges (normal −Y/+Y).",
+      "enum": ["top", "bottom", "x0", "xL", "y0", "yW"]
+    },
+    "Edge": {
+      "description": "An edge of a Part, for banding and ends: `x0`/`xL` across the ends, `y0`/`yW` along the length.",
+      "enum": ["x0", "xL", "y0", "yW"]
+    },
+    "FacePoint": {
+      "description": "A point on a Part face in the Part's own frame. Exactly the two axes of the face: `x`,`y` on top/bottom; `y`,`z` on x0/xL; `x`,`z` on y0/yW (guide, Machining).",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 2,
+      "maxProperties": 2,
+      "properties": {
+        "x": { "$ref": "#/$defs/Length" },
+        "y": { "$ref": "#/$defs/Length" },
+        "z": { "$ref": "#/$defs/Length" }
+      }
+    },
+    "Sheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "thickness", "sheetLength", "sheetWidth", "grain"],
+      "properties": {
+        "id": { "$ref": "#/$defs/LibraryId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "thickness": { "$ref": "#/$defs/Size" },
+        "sheetLength": { "$ref": "#/$defs/Size" },
+        "sheetWidth": { "$ref": "#/$defs/Size" },
+        "grain": {
+          "description": "`length`: the decor runs along `sheetLength`. `none`: ungrained.",
+          "enum": ["length", "none"]
+        }
+      }
+    },
+    "Edgeband": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "thickness", "width"],
+      "properties": {
+        "id": { "$ref": "#/$defs/LibraryId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "thickness": { "$ref": "#/$defs/Size" },
+        "width": { "$ref": "#/$defs/Size" }
+      }
+    },
+    "Room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "name": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "WallFace": {
+      "description": "One side of a Wall: `left` or `right` as seen walking from its start Corner to its end Corner.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallId", "side"],
+      "properties": {
+        "wallId": { "$ref": "#/$defs/Id" },
+        "side": { "enum": ["left", "right"] }
+      }
+    },
+    "ToRoom": {
+      "description": "Places an owner's frame in its Room's frame: rotate the owner frame by `yaw` about +Y, then translate by `origin` (guide, Positions).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "yaw"],
+      "properties": {
+        "origin": {
+          "description": "Where the owner frame's origin lies in the Room frame.",
+          "$ref": "#/$defs/Point3"
+        },
+        "yaw": {
+          "description": "Degrees counter-clockwise about +Y seen from above, 0 ≤ yaw < 360, rounded to 0.01°.",
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 360
+        }
+      }
+    },
+    "Cabinet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "roomId",
+        "wallFace",
+        "libraryCabinetId",
+        "libraryCabinetName",
+        "folder",
+        "placementType",
+        "outsideBox",
+        "toRoom"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "label": {
+          "description": "The Cabinet Label (`B3`), as stored in the Project. Unique in the file ignoring case.",
+          "type": "string",
+          "maxLength": 20
+        },
+        "roomId": { "$ref": "#/$defs/Id" },
+        "wallFace": { "$ref": "#/$defs/WallFace" },
+        "libraryCabinetId": { "$ref": "#/$defs/LibraryId" },
+        "libraryCabinetName": { "type": "string", "maxLength": 200 },
+        "folder": {
+          "description": "The Library Cabinet's Folder path, segments joined by `/` (`Kitchen/Base`). Empty at the Library root.",
+          "type": "string",
+          "maxLength": 1000
+        },
+        "placementType": { "enum": ["base", "wall", "tall", "panel"] },
+        "outsideBox": {
+          "description": "The Cabinet's Outside box in its own frame: evaluated Parts plus leg Hardware.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "depth"],
+          "properties": {
+            "width": { "$ref": "#/$defs/Size" },
+            "height": { "$ref": "#/$defs/Size" },
+            "depth": { "$ref": "#/$defs/Size" }
+          }
+        },
+        "toRoom": { "$ref": "#/$defs/ToRoom" }
+      }
+    },
+    "GeneratedItemKind": {
+      "enum": ["filler", "endPanel", "islandPanel", "toeKick", "crown", "lightRail"]
+    },
+    "GeneratedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "roomId", "kind", "wallFace", "layer", "chain", "toRoom"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Id" },
+        "label": {
+          "description": "Derived, for people: the kind, the Label of its Run's first Cabinet, and the end or Cabinet where that applies (`Toe Kick B1`, `End Panel B1 start`, `Filler B2`). Not unique and not stable: match on `id`.",
+          "type": "string",
+          "maxLength": 100
+        },
+        "roomId": { "$ref": "#/$defs/Id" },
+        "kind": { "$ref": "#/$defs/GeneratedItemKind" },
+        "wallFace": { "$ref": "#/$defs/WallFace" },
+        "layer": { "enum": ["lower", "upper"] },
+        "chain": {
+          "description": "Shared by the segments of one Generated Item that follows a Run Chain round Corners; null when it stays on one Wall Face.",
+          "oneOf": [{ "$ref": "#/$defs/Id" }, { "type": "null" }]
+        },
+        "toRoom": { "$ref": "#/$defs/ToRoom" }
+      }
+    },
+    "Owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["cabinet", "generatedItem"] },
+        "id": { "$ref": "#/$defs/Id" }
+      }
+    },
+    "Mitre": {
+      "description": "A mitred end, cut through the thickness in the Part's X–Z plane.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["angle", "longFace"],
+      "properties": {
+        "angle": {
+          "description": "Degrees away from a square cut, 0 < angle < 90, rounded to 0.01°.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 90
+        },
+        "longFace": {
+          "description": "The face on which this end reaches the long point; `length` is measured there.",
+          "enum": ["top", "bottom"]
+        }
+      }
+    },
+    "End": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mitre"],
+      "properties": {
+        "mitre": { "$ref": "#/$defs/Mitre" }
+      }
+    },
+    "Place": {
+      "description": "The Part in its owner's frame, as Library `place`: `at` is the minimum corner of its bounding box, `length` the owner axis local X follows, `top` the direction local Z (the top face) points. Local Y is top × length.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "length", "top"],
+      "properties": {
+        "at": { "$ref": "#/$defs/Point3" },
+        "length": { "$ref": "#/$defs/Axis" },
+        "top": { "$ref": "#/$defs/Axis" }
+      }
+    },
+    "Part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "owner",
+        "sheetId",
+        "thickness",
+        "length",
+        "width",
+        "cutLength",
+        "cutWidth",
+        "grain",
+        "edges",
+        "place",
+        "ops"
+      ],
+      "properties": {
+        "id": {
+          "description": "Deterministic: `<cabinetId>/<partPath>` or `<generatedItemId>/<piece>` (guide, Identity).",
+          "$ref": "#/$defs/Id"
+        },
+        "name": {
+          "description": "For a Cabinet Part, the Library Part name with the copy indices of every repeated entry, outermost first (`s0.shelf[2]`). For a Generated Item Part, its kind.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "owner": { "$ref": "#/$defs/Owner" },
+        "materialSlot": {
+          "description": "The Library Cabinet's Sheet slot name the Part is cut from (`carcass`). Cabinet Parts only.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 64
+        },
+        "sheetId": { "$ref": "#/$defs/LibraryId" },
+        "thickness": {
+          "description": "The Sheet's thickness, copied.",
+          "$ref": "#/$defs/Size"
+        },
+        "length": {
+          "description": "Finished size along local X, banding included; to the long point of a mitred end. Authoritative.",
+          "$ref": "#/$defs/Size"
+        },
+        "width": {
+          "description": "Finished size along local Y, banding included. Authoritative.",
+          "$ref": "#/$defs/Size"
+        },
+        "cutLength": {
+          "description": "`length` minus the thickness of the Edgebands on `x0` and `xL`. No shop allowances.",
+          "$ref": "#/$defs/Size"
+        },
+        "cutWidth": {
+          "description": "`width` minus the thickness of the Edgebands on `y0` and `yW`. No shop allowances.",
+          "$ref": "#/$defs/Size"
+        },
+        "grain": {
+          "description": "Effective grain: `length` when local X must follow the Sheet's grain (the Part asks for it and the Sheet is grained); otherwise `none`, and nesting may rotate the Part.",
+          "enum": ["length", "none"]
+        },
+        "edges": {
+          "description": "The Edgeband id on each banded edge. A missing key is an unbanded edge.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x0": { "$ref": "#/$defs/LibraryId" },
+            "xL": { "$ref": "#/$defs/LibraryId" },
+            "y0": { "$ref": "#/$defs/LibraryId" },
+            "yW": { "$ref": "#/$defs/LibraryId" }
+          }
+        },
+        "ends": {
+          "description": "Ends that are not square. Omitted when both are square.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "x0": { "$ref": "#/$defs/End" },
+            "xL": { "$ref": "#/$defs/End" }
+          }
+        },
+        "place": { "$ref": "#/$defs/Place" },
+        "ops": {
+          "description": "Every machining operation, fully evaluated and expanded: one entry per hole, groove or pocket.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/Op" }
+        }
+      },
+      "if": {
+        "properties": { "owner": { "type": "object", "properties": { "kind": { "const": "cabinet" } } } }
+      },
+      "then": { "required": ["materialSlot"] },
+      "else": { "not": { "required": ["materialSlot"] } }
+    },
+    "Op": {
+      "oneOf": [
+        { "$ref": "#/$defs/Drill" },
+        { "$ref": "#/$defs/Groove" },
+        { "$ref": "#/$defs/Pocket" }
+      ]
+    },
+    "Drill": {
+      "description": "A hole into `face` at `at`: vertical on top/bottom, horizontal on an edge. Exactly one of `depth` or `through`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "face", "at", "diameter", "source"],
+      "properties": {
+        "type": { "const": "drill" },
+        "face": { "$ref": "#/$defs/Face" },
+        "at": { "$ref": "#/$defs/FacePoint" },
+        "diameter": { "$ref": "#/$defs/Size" },
+        "depth": { "$ref": "#/$defs/Size" },
+        "through": { "const": true },
+        "source": { "$ref": "#/$defs/Source" }
+      },
+      "oneOf": [{ "required": ["depth"] }, { "required": ["through"] }]
+    },
+    "Groove": {
+      "description": "A straight slot on `face`; `from`/`to` are the ends of its centre line, the width centred on it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "face", "from", "to", "width", "depth", "source"],
+      "properties": {
+        "type": { "const": "groove" },
+        "face": { "$ref": "#/$defs/Face" },
+        "from": { "$ref": "#/$defs/FacePoint" },
+        "to": { "$ref": "#/$defs/FacePoint" },
+        "width": { "$ref": "#/$defs/Size" },
+        "depth": { "$ref": "#/$defs/Size" },
+        "source": { "$ref": "#/$defs/Source" }
+      }
+    },
+    "Pocket": {
+      "description": "A rectangular recess on `face`, `length` along the face's u axis and `width` along v.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "face", "centre", "length", "width", "cornerRadius", "depth", "source"],
+      "properties": {
+        "type": { "const": "pocket" },
+        "face": { "$ref": "#/$defs/Face" },
+        "centre": { "$ref": "#/$defs/FacePoint" },
+        "length": { "$ref": "#/$defs/Size" },
+        "width": { "$ref": "#/$defs/Size" },
+        "cornerRadius": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "depth": { "$ref": "#/$defs/Size" },
+        "source": { "$ref": "#/$defs/Source" }
+      }
+    },
+    "Source": {
+      "description": "Why the op exists. Consumers may ignore it.",
+      "oneOf": [{ "$ref": "#/$defs/OpSource" }, { "$ref": "#/$defs/HardwareSource" }]
+    },
+    "OpSource": {
+      "description": "An operation the Library Cabinet's Author wrote on the Part.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "index"],
+      "properties": {
+        "kind": { "const": "op" },
+        "index": {
+          "description": "The op's index in the Library Part's `ops`.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "HardwareSource": {
+      "description": "A hole drilled for a Hardware placement's Mount (including holes-only placements such as Pin hole columns).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "hardwareKind", "itemId", "itemName", "pattern", "placement"],
+      "properties": {
+        "kind": { "const": "hardware" },
+        "hardwareKind": {
+          "description": "The Library's Hardware kind (`hinge`, `mounting-plate`, `shelf-support`, …).",
+          "type": "string",
+          "pattern": "^[a-z][a-z-]*$",
+          "maxLength": 64
+        },
+        "itemId": { "$ref": "#/$defs/LibraryId" },
+        "itemName": { "type": "string", "maxLength": 200 },
+        "pattern": {
+          "description": "The drill pattern name on the item (`cup`, `plate`, `pin`).",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "maxLength": 64
+        },
+        "placement": {
+          "description": "The placement copy, as a Library Violation subject: `hardware:<owner>/<index>` plus copy indices (`hardware:s0.door.leaf/0[1,0]`).",
+          "type": "string",
+          "pattern": "^hardware:",
+          "maxLength": 256
+        }
+      }
+    },
+    "Skipped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "label", "roomId", "name", "reason", "problems"],
+      "properties": {
+        "kind": { "enum": ["cabinet", "generatedItem"] },
+        "id": { "$ref": "#/$defs/Id" },
+        "label": {
+          "description": "The Cabinet Label, or the Generated Item's derived label, as in `cabinets` and `generatedItems`.",
+          "type": "string",
+          "maxLength": 100
+        },
+        "roomId": { "$ref": "#/$defs/Id" },
+        "name": {
+          "description": "The Library Cabinet's name, or the Generated Item's kind.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "reason": {
+          "description": "`invalid`: a Cabinet with an error Violation. `placeholder`: a Cabinet whose Library Cabinet is missing. `noMaterial`: a Generated Item with no Material to cut from.",
+          "enum": ["invalid", "placeholder", "noMaterial"]
+        },
+        "problems": {
+          "description": "Violation codes for `invalid` (`hardware.fit`, `check.minWidth`, …); empty otherwise.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    }
+  }
+}
