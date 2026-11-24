@@ -12,10 +12,14 @@ interface SideBProps {
   /** Where a Part is cut (`W18-1-A #1`, `Saw · Board 1`). */
   whereOf: (partId: string) => string | undefined;
   onDownload: (file: SideBFile) => void;
+  /** "Side B done": ticks Side B on every Part of the file. */
+  onDone: (file: SideBFile) => void;
+  /** How many of a file's Parts have Side B ticked. */
+  doneOf: (file: SideBFile) => number;
 }
 
 /** The Side B batch: one card per file with its bottom view, the Fence corner, the edge names and its Parts. */
-export function SideBView({ files, job, nameOf, whereOf, onDownload }: SideBProps) {
+export function SideBView({ files, job, nameOf, whereOf, onDownload, onDone, doneOf }: SideBProps) {
   if (files.length === 0) return null;
   return (
     <section aria-label="Side B">
@@ -36,7 +40,19 @@ export function SideBView({ files, job, nameOf, whereOf, onDownload }: SideBProp
               }}
             >
               Download {file.id}
-            </button>
+            </button>{' '}
+            <button
+              type="button"
+              disabled={doneOf(file) === file.partIds.length}
+              onClick={() => {
+                onDone(file);
+              }}
+            >
+              Side B done {file.id}
+            </button>{' '}
+            <span className="tally">
+              {doneOf(file)} / {file.partIds.length} Side B
+            </span>
           </figcaption>
           <SideBDrawing file={file} />
           <p>

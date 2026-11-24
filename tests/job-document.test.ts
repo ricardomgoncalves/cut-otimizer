@@ -13,6 +13,7 @@ import {
   shortIdFor,
   toJobFile,
   withJob,
+  withProgress,
   type JobDocument,
 } from '../src/core/job-store/document.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
@@ -76,6 +77,27 @@ describe('The Job document', () => {
     if ('error' in reopened) throw new Error(reopened.error);
     expect(reopened.job?.sawCnc).toEqual({ 'c1/s0.rail[1]': 'cnc' });
     expect(reopened.job?.plan.sheets[0]?.sawParts).toEqual(['c1/leftSide']);
+  });
+
+  it('starts with no ticks, stores them with withProgress, and keeps them through .job.json', () => {
+    const doc = syntheticDocument();
+    expect(doc.progress).toEqual({});
+    const later = '2026-11-25T08:00:00.000Z';
+    const ticked = withProgress(doc, { 'c1/s0.rail[1]': { cut: later } }, later);
+    expect(ticked.updatedAt).toBe(later);
+    const read = fromJobFile(toJobFile(ticked));
+    expect('doc' in read && read.doc.progress).toEqual({ 'c1/s0.rail[1]': { cut: later } });
+  });
+
+  it('opens a file saved before progress existed with no ticks, and refuses malformed ticks', () => {
+    const file = JSON.parse(toJobFile(syntheticDocument())) as Record<string, unknown>;
+    delete file['progress'];
+    const read = fromJobFile(JSON.stringify(file));
+    expect('doc' in read && read.doc.progress).toEqual({});
+    const bad = { ...file, progress: { 'c1/s0.rail[1]': { cut: 7 } } };
+    expect(fromJobFile(JSON.stringify(bad))).toEqual({ error: expect.stringContaining('progress') });
+    const unknownStep = { ...file, progress: { 'c1/s0.rail[1]': { painted: NOW } } };
+    expect(fromJobFile(JSON.stringify(unknownStep))).toEqual({ error: expect.stringContaining('progress') });
   });
 
   it('downloads as <name>.job.json', () => {

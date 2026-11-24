@@ -125,6 +125,7 @@ function buildModel(file: PartsExport): ImportResult {
       top,
       bottom,
       manualOps,
+      edges: { ...p.edges },
     };
   });
 

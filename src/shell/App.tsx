@@ -21,11 +21,24 @@ import {
   shortIdFor,
   toJobFile,
   withJob,
+  withProgress,
   type JobDocument,
 } from '../core/job-store/document.ts';
 import type { JobSummary } from '../core/job-store/store.ts';
 import type { Model, Part } from '../core/model.ts';
 import type { PartMode, SawReason, SheetPlan, SideBFile } from '../core/planner/index.ts';
+import {
+  apply,
+  boardId,
+  isDone,
+  rollup,
+  steps,
+  STEPS,
+  wouldUnlock,
+  type Progress,
+  type ProgressEvent,
+  type Step,
+} from '../core/progress.ts';
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
@@ -34,10 +47,12 @@ import { ImportSummary, SkippedWarning } from './ImportSummary.tsx';
 import { createDexieJobStore } from './job-store-dexie.ts';
 import { JobList } from './JobList.tsx';
 import { PartDetail } from './PartDetail.tsx';
+import { ProgressPanel } from './ProgressPanel.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
 import { ManualOpsList, SideBView } from './SideBView.tsx';
 import { loadSettings, saveSettings } from './settings-store.ts';
+import { STEP_LABELS } from './step-labels.ts';
 
 /** Every Job lives in IndexedDB; every change to the open Job is saved straight away. */
 const store = createDexieJobStore();
@@ -84,6 +99,8 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [view, setView] = useState<'job' | 'settings'>('job');
   const [codeError, setCodeError] = useState<string | null>(null);
+  /** An untick waiting for confirmation because it would unlock these Board and Blank ids. */
+  const [pendingUntick, setPendingUntick] = useState<{ partId: string; step: Step; unlocks: string[] } | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -131,6 +148,7 @@ export function App() {
   }
 
   function resetMessages() {
+    setPendingUntick(null);
     setIssues([]);
     setLoadError(null);
     setCodeError(null);
@@ -290,6 +308,26 @@ export function App() {
     save(withJob(open.doc, result.job, now()), open.model, result.job);
   }
 
+  /** Applies a tick, untick or bulk tick to the open Job and saves it. */
+  function onProgress(event: ProgressEvent) {
+    if (!open?.job) return;
+    const progress = apply(open.job, open.doc.progress, event);
+    if (progress !== open.doc.progress) save(withProgress(open.doc, progress, now()), open.model, open.job);
+  }
+
+  /** Ticks or unticks one Step. Unticking asks first when it would unlock a Board or Blank. */
+  function onStep(partId: string, step: Step, ticked: boolean) {
+    if (!open?.job) return;
+    setPendingUntick(null);
+    if (ticked) {
+      onProgress({ kind: 'tick', partId, step, at: now() });
+      return;
+    }
+    const unlocks = wouldUnlock(open.job, open.doc.progress, partId, step);
+    if (unlocks.length > 0) setPendingUntick({ partId, step, unlocks });
+    else onProgress({ kind: 'untick', partId, step });
+  }
+
   function onDownload() {
     if (!open?.job) return;
     const zip = zipFiles(toDxfFiles(open.job.plan, open.doc.shortId));
@@ -318,6 +356,9 @@ export function App() {
   const sideBOf = (id: string) => sideBById.get(id);
   const whereById = job ? partLocations(job.plan.sheets) : new Map<string, string>();
   const changed = job ? snapshotChanges(job, settings) : [];
+  const progress: Progress = open?.doc.progress ?? {};
+  const rolled = job ? rollup(job, progress) : null;
+  const blankRoll = new Map(rolled?.blanks.map((b) => [b.id, b]) ?? []);
 
   const header = (
     <>
@@ -444,6 +485,33 @@ export function App() {
               {codeError}
             </p>
           )}
+          {pendingUntick && (
+            <div role="alertdialog" aria-label="Confirm untick" className="warning-box">
+              <p>
+                Unticking {STEP_LABELS[pendingUntick.step]} on {nameOf(pendingUntick.partId)} would unlock{' '}
+                {pendingUntick.unlocks.join(' and ')}: nothing else on {pendingUntick.unlocks.length > 1 ? 'them' : 'it'}{' '}
+                is ticked Cut.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingUntick(null);
+                  onProgress({ kind: 'untick', partId: pendingUntick.partId, step: pendingUntick.step });
+                }}
+              >
+                Untick
+              </button>{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingUntick(null);
+                }}
+              >
+                Keep ticked
+              </button>
+            </div>
+          )}
+          {rolled && <ProgressPanel rollup={rolled} owners={job.model.owners} />}
           <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
           {job.plan.sheets.map((sheet) => (
             <section key={sheet.sheetId}>
@@ -459,16 +527,50 @@ export function App() {
                 }}
               />
               <h4>Breakdown</h4>
-              {sheet.boards.map((board) => (
-                <BoardBreakdown key={board.number} code={sheet.code} board={board} nameOf={nameOf} />
-              ))}
+              {sheet.boards.map((board) => {
+                const sawLeft = board.sawParts.filter((p) => progress[p.partId]?.cut === undefined).length;
+                return (
+                  <div key={board.number}>
+                    <BoardBreakdown code={sheet.code} board={board} nameOf={nameOf} />
+                    {board.sawParts.length > 0 && (
+                      <p>
+                        <button
+                          type="button"
+                          disabled={sawLeft === 0}
+                          onClick={() => {
+                            onProgress({ kind: 'breakdownDone', boardId: boardId(sheet, board), at: now() });
+                          }}
+                        >
+                          Breakdown done {sheet.code} Board {board.number}
+                        </button>{' '}
+                        <span className="tally">
+                          {board.sawParts.length - sawLeft} / {board.sawParts.length} Saw Parts Cut
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
               <h4>Layouts</h4>
               {sheet.boards.flatMap((board) =>
                 board.blanks.map((blank) => (
                   <figure key={blank.id}>
                     <figcaption>
                       <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
-                      {blank.parts.length} Part(s)
+                      {blank.parts.length} Part(s){' '}
+                      <button
+                        type="button"
+                        disabled={blankRoll.get(blank.id)?.cut === blank.parts.length}
+                        onClick={() => {
+                          onProgress({ kind: 'sideADone', blankId: blank.id, at: now() });
+                        }}
+                      >
+                        Side A done {blank.id}
+                      </button>{' '}
+                      <span className="tally">
+                        {blankRoll.get(blank.id)?.cut ?? 0} / {blank.parts.length} Cut ·{' '}
+                        {blankRoll.get(blank.id)?.done ?? 0} / {blank.parts.length} Done
+                      </span>
                     </figcaption>
                     <BlankLayout
                       blank={blank}
@@ -499,7 +601,13 @@ export function App() {
                   </figure>
                 )),
               )}
-              <PartList model={job.model} sheet={sheet} onMode={onPartMode} />
+              <PartList
+                job={job}
+                sheet={sheet}
+                progress={progress}
+                onMode={onPartMode}
+                onStep={onStep}
+              />
             </section>
           ))}
           <SideBView
@@ -508,6 +616,10 @@ export function App() {
             nameOf={nameOf}
             whereOf={(id) => whereById.get(id)}
             onDownload={onDownloadSideB}
+            onDone={(file) => {
+              onProgress({ kind: 'sideBDone', fileId: file.id, at: now() });
+            }}
+            doneOf={(file) => file.partIds.filter((id) => progress[id]?.sideB !== undefined).length}
           />
         </>
       )}
@@ -591,9 +703,16 @@ const SAW_REASONS: Record<SawReason, string> = {
   chosen: 'chosen',
 };
 
-/** Every Part of a Sheet with where it is cut, the narrow warning and the Saw / CNC toggle. */
-function PartList(props: { model: Model; sheet: SheetPlan; onMode: (partId: string, mode: PartMode) => void }) {
-  const { model, sheet } = props;
+/** Every Part of a Sheet with where it is cut, the narrow warning, the Saw / CNC toggle and its Step ticks. */
+function PartList(props: {
+  job: Job;
+  sheet: SheetPlan;
+  progress: Progress;
+  onMode: (partId: string, mode: PartMode) => void;
+  onStep: (partId: string, step: Step, ticked: boolean) => void;
+}) {
+  const { job, sheet, progress } = props;
+  const model = job.model;
   const where = new Map<string, { text: string; narrow: boolean }>();
   for (const board of sheet.boards) {
     for (const blank of board.blanks) {
@@ -613,6 +732,12 @@ function PartList(props: { model: Model; sheet: SheetPlan; onMode: (partId: stri
           <th scope="col">Cut size (mm)</th>
           <th scope="col">Where</th>
           <th scope="col">Saw / CNC</th>
+          {STEPS.map((step) => (
+            <th key={step} scope="col">
+              {STEP_LABELS[step]}
+            </th>
+          ))}
+          <th scope="col">Done</th>
         </tr>
       </thead>
       <tbody>
@@ -622,6 +747,7 @@ function PartList(props: { model: Model; sheet: SheetPlan; onMode: (partId: stri
             const at = where.get(p.id);
             const saw = sheet.sawParts.includes(p.id);
             const fixed = sheet.sawReasons[p.id] === 'oversize';
+            const applicable = steps(job, p.id);
             return (
               <tr key={p.id}>
                 <td>{p.displayName}</td>
@@ -645,6 +771,24 @@ function PartList(props: { model: Model; sheet: SheetPlan; onMode: (partId: stri
                     Saw
                   </label>
                 </td>
+                {STEPS.map((step) => (
+                  <td key={step}>
+                    {applicable.includes(step) ? (
+                      <input
+                        type="checkbox"
+                        aria-label={`${STEP_LABELS[step]}: ${p.displayName}`}
+                        checked={progress[p.id]?.[step] !== undefined}
+                        title={progress[p.id]?.[step]}
+                        onChange={(e) => {
+                          props.onStep(p.id, step, e.target.checked);
+                        }}
+                      />
+                    ) : (
+                      <span aria-hidden="true">—</span>
+                    )}
+                  </td>
+                ))}
+                <td>{isDone(job, progress, p.id) ? 'Done' : ''}</td>
               </tr>
             );
           })}
