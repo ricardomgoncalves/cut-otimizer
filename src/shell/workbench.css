@@ -1,0 +1,215 @@
+/*
+ * The Workbench: the gcode-viewer theme (dense, quiet, IBM Plex, one blue accent), laid out as a top bar,
+ * a left side panel (Jobs, the open Job, its Sheets), a dark stage (drawings) and a right inspector
+ * (what needs attention, progress, documents). Every colour comes from the tokens below.
+ */
+
+:root {
+  --bg: #15191e; --panel: #1d2228; --raised: #262c34; --line: #333b45;
+  --fg: #dfe4ea; --muted: #8c96a3; --accent: #5fb0e8; --accent-fg: #0d1a24;
+  --error: #f0605d; --warning: #e9b949; --current: #24384a;
+  --viewport: #1b1f24;
+  --ui: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #eef1f4; --panel: #f8f9fb; --raised: #ffffff; --line: #d3d9e0;
+    --fg: #1b2129; --muted: #5d6874; --accent: #1f6fae; --accent-fg: #ffffff;
+    --error: #c93a37; --warning: #a8780c; --current: #d6e8f7; color-scheme: light;
+  }
+}
+
+/* The stage stays dark in both themes, so drawings, their labels and the stage's tables read the same. */
+.stage {
+  --bg: #15191e; --panel: #1d2228; --raised: #262c34; --line: #333b45;
+  --fg: #dfe4ea; --muted: #8c96a3; --accent: #5fb0e8; --accent-fg: #0d1a24;
+  --error: #f0605d; --warning: #e9b949; --current: #24384a;
+  color-scheme: dark;
+}
+
+/* Drawing colours (Breakdowns, Layouts, Side B views): the canvas overlay palette, dark in both themes. */
+svg {
+  --text: #dfe4ea;          /* labels */
+  --ref: #4a5561;           /* Board and Blank outlines (grid major) */
+  --part: #b9a582;          /* Cut Part stroke (wood) */
+  --part-bg: #8a7a62;       /* Cut Part fill (wood) */
+  --saw-bg: #8a7a62;        /* Saw Part fill (wood) */
+  --flip-bg: color-mix(in srgb, #e88a5f 55%, #1b1f24); /* Flip Part: the second marker colour */
+  --remade-bg: #2c333b;     /* Remade Part left on its old Blank */
+  --blank-bg: color-mix(in srgb, #8a7a62 30%, #1b1f24);
+  --offcut-bg: color-mix(in srgb, #c8ccd2 18%, #1b1f24);
+  --waste-bg: #1b1f24;
+  --cut: #4cc3ff;           /* rips and crosscuts: cutting path lines */
+  --warn: #e9b949;
+  --muted: #8c96a3;
+}
+figure > svg, .breakdown > svg {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 420px;
+  padding: 8px;
+  background: var(--viewport) !important;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+/* Base */
+html, body, #root { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 var(--ui); overflow: hidden; }
+* { overflow-wrap: anywhere; }
+h1, h2, h3, h4 { font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: 12px 0 6px; }
+h1 { font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--fg); margin: 0; }
+p { margin: 6px 0; }
+ul, ol { margin: 6px 0; padding-left: 18px; }
+strong, b { font-weight: 400; color: var(--fg); }
+small { font-size: 11px; color: var(--muted); }
+code, kbd, .tally, .mono { font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.tally { color: var(--muted); }
+.raw-name { color: var(--muted); font: 11px var(--mono); }
+.muted { color: var(--muted); }
+.small { font-size: 11px; }
+.error { color: var(--error); }
+.warn { color: var(--warning); }
+.locked { color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+/* Buttons. Toggles and tabs take their on-state from aria-pressed / aria-expanded / aria-current. */
+button, .file-button { font: inherit; color: var(--fg); background: var(--raised); border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+button:hover:not(:disabled), .file-button:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, .file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); min-width: 64px; }
+button.link { background: none; border: none; padding: 0; color: var(--accent); }
+button.danger { color: var(--error); border-color: var(--error); }
+button[aria-pressed="true"], button[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+/* A file input shown as a button: the input stays in the label (so it keeps its name) but is hidden. */
+.file-button { position: relative; display: inline-block; white-space: nowrap; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+
+/* Inputs: every text-like input, select and textarea. */
+input:not([type]), input[type="text"], input[type="number"], select, textarea {
+  box-sizing: border-box; min-width: 0; max-width: 100%; font: 12px var(--mono); color: var(--fg);
+  background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+input[aria-invalid="true"] { border-color: var(--error); }
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent); }
+form label { font-size: 11px; color: var(--muted); }
+fieldset { border: 1px dashed var(--line); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+legend { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 0 4px; }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; font-size: 11px; margin: 6px 0; }
+th { font-size: 10px; font-weight: 400; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+th, td { text-align: left; padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody th { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--fg); }
+tbody tr:hover { background: var(--raised); }
+tr[aria-current="true"] { background: var(--current); }
+tr.sheet-row th { color: var(--muted); }
+
+/* Notices: amber for warnings and things that wait, red for errors. */
+.warning-box, .stale { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--warning); border-radius: 4px;
+  background: var(--raised); color: var(--fg); }
+.warning-box p:first-child, .stale p:first-child { margin-top: 0; }
+.warning-box h3 { margin-top: 0; }
+div[role="alert"].error { padding: 6px 8px; border: 1px solid var(--error); border-radius: 4px; background: var(--raised); }
+
+figure { margin: 8px 0; }
+figcaption { margin-bottom: 4px; font-size: 11px; color: var(--muted); }
+figcaption strong { font: 12px var(--mono); }
+details summary { cursor: pointer; }
+
+/* Key–value stats */
+dl.stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 6px 0; font-size: 12px; }
+dl.stats dt { color: var(--muted); }
+dl.stats dd { margin: 0; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Progress: 6px track filled with the accent. */
+.bar { height: 6px; background: var(--raised); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.warning { background: var(--warning); border-radius: 1px; transform: rotate(45deg) scale(.85); }
+
+/* Cut sheet and label previews are paper: they stay white. */
+.sheet-pages { display: flex; flex-wrap: wrap; gap: 6px; }
+.sheet-page { width: min(100%, 300px); overflow: hidden; background: #fff; border: 1px solid var(--line); border-radius: 4px; }
+.sheet-page svg { display: block; width: 100%; height: auto; }
+
+/* ---------- Layout ---------- */
+
+.workbench { display: grid; height: 100%;
+  grid-template: "top top top" auto "side stage right" 1fr / 300px minmax(0, 1fr) 340px; }
+/* Machine settings and Scan mode: the top bar over one panel. */
+.workbench.single { grid-template: "top" auto "main" 1fr / minmax(0, 1fr); }
+
+.topbar { grid-area: top; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0;
+  padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.topbar .crumb { color: var(--muted); min-width: 0; }
+.topbar .spacer { flex: 1; }
+.topbar nav { display: flex; gap: 4px; }
+
+.side, .inspector, .single-main { min-height: 0; overflow-y: auto; background: var(--panel); }
+.side { grid-area: side; border-right: 1px solid var(--line); }
+.inspector { grid-area: right; border-left: 1px solid var(--line); }
+.single-main { grid-area: main; padding: 8px 12px; }
+.single-main > * { max-width: 760px; }
+.stage { grid-area: stage; min-width: 0; min-height: 0; overflow-y: auto; position: relative;
+  padding: 8px 10px; background: var(--viewport); color: var(--fg); }
+
+/* Stacked sections in the side panels. A component's own first heading becomes the section's panel heading. */
+.pane { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.panelhead, .side > section > h2:first-child, .pane > section > h2:first-child, .pane > section > h3:first-child {
+  display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--line);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.pane > section > h2:first-child, .pane > section > h3:first-child { margin: -8px -10px 8px; }
+.empty { padding: 8px 10px; color: var(--muted); }
+
+/* Jobs list */
+.jobs { list-style: none; margin: 0; padding: 0; }
+.jobs li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 6px; padding: 4px 10px;
+  border-bottom: 1px solid var(--line); }
+.jobs li:hover { background: var(--raised); }
+.jobs li[aria-current="true"] { background: var(--current); }
+.jobs .job-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; }
+.jobs .job-actions button { font-size: 11px; padding: 1px 6px; }
+.jobs-toolbar { padding: 4px 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
+
+/* Sheets list: jumps to each Sheet on the stage. */
+.sheet-nav { display: grid; gap: 3px; width: 100%; padding: 4px 10px; text-align: left; background: none;
+  border: none; border-bottom: 1px solid var(--line); border-radius: 0; }
+.sheet-nav:hover:not(:disabled) { background: var(--raised); }
+.sheet-nav[aria-current="true"] { background: var(--current); }
+
+/* Each Sheet on the stage is a block with its heading as a divider. */
+.stage-sheet { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); scroll-margin-top: 8px; }
+.stage-sheet > section > h3:first-child { margin-top: 0; color: var(--fg); }
+
+/* Machine settings: label beside a compact input. */
+.settings fieldset label:has(input[type="number"]) { display: grid; grid-template-columns: minmax(0, 1fr) 140px; align-items: center; gap: 6px; }
+.settings fieldset p { margin: 3px 0; }
+.settings textarea { width: 100%; }
+
+/* Scan mode: the one place type is large, so it reads from across the shop. */
+.scan-video { display: block; width: 100%; max-width: 480px; border-radius: 6px; }
+.scan-feedback { margin: 12px 0; padding: 12px; font-size: 18px; background: var(--raised);
+  border: 1px solid var(--line); border-radius: 6px; }
+.scan-feedback p { margin: 2px 0; }
+.scan-feedback.ok { border-color: var(--accent); }
+.scan-feedback.warn { border-color: var(--warning); }
+.scan-feedback.error { border-color: var(--error); color: var(--error); }
+.scan-headline { font-size: 28px; }
+.scan-part { font-size: 22px; }
+.scan-where { font: 18px var(--mono); }
+.scan-warning { color: var(--warning); }
+.step-choice { margin-right: 12px; }
+
+/* The open Job's facts: a label, then its value on the right. */
+.facts p { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; font-size: 12px; color: var(--muted); }
+.facts code { color: var(--fg); text-align: right; }
