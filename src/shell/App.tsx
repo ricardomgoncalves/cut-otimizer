@@ -1,24 +1,27 @@
-import { useState, type ChangeEvent } from 'react';
+import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { APP_NAME } from '../core/app.ts';
 import { toDxfFiles } from '../core/dxf/index.ts';
 import { importExport, type ImportIssue } from '../core/import/index.ts';
-import type { Model } from '../core/model.ts';
-import { plan, type Plan } from '../core/planner/index.ts';
-import { DEFAULT_SETTINGS } from '../core/settings.ts';
+import { generateJob, regenerate, setSheetCode, sheetCode, snapshotChanges, type Job } from '../core/job.ts';
+import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { downloadBytes, safeFileName, zipFiles } from './download.ts';
+import { SETTING_LABELS } from './setting-labels.ts';
+import { SettingsScreen } from './SettingsScreen.tsx';
+import { loadSettings, saveSettings } from './settings-store.ts';
 
-/** The Job, held in memory only for now (the Job store comes in ticket #29). */
-interface Job {
+/** The open Job, held in memory only for now (the Job store comes in ticket #29). */
+interface LoadedJob extends Job {
   fileName: string;
-  model: Model;
-  plan: Plan;
 }
 
 export function App() {
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<LoadedJob | null>(null);
   const [issues, setIssues] = useState<ImportIssue[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [view, setView] = useState<'job' | 'settings'>('job');
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   async function onLoad(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -27,6 +30,7 @@ export function App() {
     setJob(null);
     setIssues([]);
     setLoadError(null);
+    setCodeError(null);
 
     let json: unknown;
     try {
@@ -41,7 +45,28 @@ export function App() {
       setLoadError(`${file.name} is not a valid Parts Export v1. Nothing was loaded.`);
       return;
     }
-    setJob({ fileName: file.name, model: result.model, plan: plan(result.model, DEFAULT_SETTINGS) });
+    setJob({ fileName: file.name, ...generateJob(result.model, settings) });
+  }
+
+  function onSaveSettings(next: Settings): boolean {
+    setSettings(next);
+    return saveSettings(next);
+  }
+
+  function onRegenerate() {
+    if (!job) return;
+    setJob({ fileName: job.fileName, ...regenerate(job, settings) });
+  }
+
+  function onSheetCode(sheetId: string, code: string) {
+    if (!job) return;
+    const result = setSheetCode(job, sheetId, code);
+    if ('error' in result) {
+      setCodeError(result.error);
+      return;
+    }
+    setCodeError(null);
+    setJob({ fileName: job.fileName, ...result.job });
   }
 
   function onDownload() {
@@ -52,10 +77,46 @@ export function App() {
 
   const schemaErrors = issues.filter((i) => i.kind === 'schema');
   const warnings = issues.filter((i) => i.kind === 'warning');
+  const changed = job ? snapshotChanges(job, settings) : [];
+
+  const header = (
+    <>
+      <h1>{APP_NAME}</h1>
+      <nav>
+        <button
+          type="button"
+          aria-pressed={view === 'job'}
+          onClick={() => {
+            setView('job');
+          }}
+        >
+          Job
+        </button>{' '}
+        <button
+          type="button"
+          aria-pressed={view === 'settings'}
+          onClick={() => {
+            setView('settings');
+          }}
+        >
+          Machine settings
+        </button>
+      </nav>
+    </>
+  );
+
+  if (view === 'settings') {
+    return (
+      <main>
+        {header}
+        <SettingsScreen settings={settings} sheets={job?.model.sheets ?? []} onSave={onSaveSettings} />
+      </main>
+    );
+  }
 
   return (
     <main>
-      <h1>{APP_NAME}</h1>
+      {header}
 
       <p>
         <label>
@@ -92,6 +153,23 @@ export function App() {
               ))}
             </ul>
           )}
+          {changed.length > 0 && (
+            <div role="status" className="stale">
+              <p>
+                This Job was generated with different Machine settings (
+                {changed.map((k) => SETTING_LABELS[k]).join(', ')}). Its files keep the old settings until
+                you regenerate it.
+              </p>
+              <button type="button" onClick={onRegenerate}>
+                Regenerate
+              </button>
+            </div>
+          )}
+          {codeError && (
+            <p role="alert" className="error">
+              {codeError}
+            </p>
+          )}
           <p>
             <button type="button" onClick={onDownload}>
               Download DXFs
@@ -102,6 +180,14 @@ export function App() {
               <h3>
                 {sheet.code} · {job.model.sheets.find((s) => s.id === sheet.sheetId)?.name}
               </h3>
+              <SheetCodeField
+                key={sheetCode(job, sheet.sheetId)}
+                code={sheetCode(job, sheet.sheetId)}
+                sheetName={job.model.sheets.find((s) => s.id === sheet.sheetId)?.name ?? sheet.sheetId}
+                onCommit={(code) => {
+                  onSheetCode(sheet.sheetId, code);
+                }}
+              />
               {sheet.sawParts.length > 0 && (
                 <p>
                   Saw Parts:{' '}
@@ -134,5 +220,33 @@ export function App() {
         </>
       )}
     </main>
+  );
+}
+
+/** A Sheet code input, committed on Enter or when it loses focus. Empty goes back to the derived code. */
+function SheetCodeField(props: { code: string; sheetName: string; onCommit: (code: string) => void }) {
+  const [value, setValue] = useState(props.code);
+  const commit = () => {
+    if (value.trim().toUpperCase() !== props.code) props.onCommit(value);
+  };
+  return (
+    <form
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        commit();
+      }}
+    >
+      <label>
+        Sheet code for {props.sheetName}{' '}
+        <input
+          size={8}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+          }}
+          onBlur={commit}
+        />
+      </label>
+    </form>
   );
 }
