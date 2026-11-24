@@ -216,3 +216,63 @@ export function steps(job: JobView, partId: string): Step[] {
   if (job.plan.manualOps.some((op) => op.partId === partId)) out.push('manualOps');
   return out;
 }
+
+/** Old Export Part id -> new one, recorded by re-import. Permanent: old stickers keep scanning. */
+export type IdAliases = Record<string, string>;
+
+/**
+ * Follows the alias table from an old Part id to the id the Part has now (an id with no alias is its
+ * own). Chains from several re-imports are followed; a cycle stops where it started.
+ */
+export function resolveAlias(aliases: IdAliases, partId: string): string {
+  const seen = new Set<string>();
+  let id = partId;
+  while (Object.hasOwn(aliases, id) && !seen.has(id)) {
+    seen.add(id);
+    id = aliases[id] ?? id;
+  }
+  return id;
+}
+
+/** What a scan needs to know about the open Job besides its Plan. */
+export interface ScanJob {
+  /** The Job's short id: the first half of every label's payload. */
+  shortId: string;
+  aliases: IdAliases;
+}
+
+/** A label's QR payload: `<job short id>:<Part id>`. */
+export function scanPayload(shortId: string, partId: string): string {
+  return `${shortId}:${partId}`;
+}
+
+export type ScanOutcome =
+  /** Nothing ticked: not a payload, another Job's label, or a Part this Job doesn't have. */
+  | { kind: 'rejected'; reason: 'unreadable' | 'otherJob' | 'unknownPart'; payload: string }
+  /** Nothing ticked: the Part has no such Step, or it is already ticked. */
+  | { kind: 'notTicked'; reason: 'noSuchStep' | 'alreadyTicked'; partId: string; step: Step }
+  /** Ticked. `openEarlier` = the Part's Steps before this one that are still open (a warning). */
+  | { kind: 'ticked'; partId: string; step: Step; progress: Progress; openEarlier: Step[] };
+
+/** Scan mode: ticks `step` on the Part a scanned payload names, by the Scan-mode rules. */
+export function scan(
+  job: JobView,
+  scanJob: ScanJob,
+  progress: Progress,
+  { payload, step, at }: { payload: string; step: Step; at: string },
+): ScanOutcome {
+  const text = payload.trim();
+  const colon = text.indexOf(':');
+  if (colon <= 0 || colon === text.length - 1) return { kind: 'rejected', reason: 'unreadable', payload };
+  if (text.slice(0, colon).toUpperCase() !== scanJob.shortId.toUpperCase()) {
+    return { kind: 'rejected', reason: 'otherJob', payload };
+  }
+  const partId = resolveAlias(scanJob.aliases, text.slice(colon + 1));
+  const applicable = steps(job, partId);
+  if (applicable.length === 0) return { kind: 'rejected', reason: 'unknownPart', payload };
+  if (!applicable.includes(step)) return { kind: 'notTicked', reason: 'noSuchStep', partId, step };
+  const ticks = progress[partId];
+  if (ticks?.[step] !== undefined) return { kind: 'notTicked', reason: 'alreadyTicked', partId, step };
+  const openEarlier = applicable.slice(0, applicable.indexOf(step)).filter((s) => ticks?.[s] === undefined);
+  return { kind: 'ticked', partId, step, progress: apply(job, progress, { kind: 'tick', partId, step, at }), openEarlier };
+}

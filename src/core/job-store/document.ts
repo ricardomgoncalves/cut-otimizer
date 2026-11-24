@@ -8,7 +8,7 @@ import { importExport, type ImportIssue } from '../import/index.ts';
 import type { Job } from '../job.ts';
 import type { Model } from '../model.ts';
 import type { Plan } from '../planner/index.ts';
-import { STEPS, type PartTicks, type Progress } from '../progress.ts';
+import { STEPS, type IdAliases, type PartTicks, type Progress } from '../progress.ts';
 import { parseSettings, type Settings } from '../settings.ts';
 
 export const JOB_FORMAT = 1;
@@ -44,6 +44,11 @@ export interface JobDocument {
    * files saved before ticking existed: read as no ticks.
    */
   progress: Progress;
+  /**
+   * Old Export Part id -> new one, added by re-import and never removed, so old stickers still scan
+   * (progress.ts `resolveAlias`). Empty until a re-import adds entries; missing in older files.
+   */
+  idAliases: IdAliases;
 }
 
 /** A step from `jobFormat` n to n + 1, keyed by n. */
@@ -82,6 +87,7 @@ export function createJobDocument({ id, shortId, rawExport, fileName, model, set
     plan: null,
     sawCncOverrides: {},
     progress: {},
+    idAliases: {},
   };
 }
 
@@ -233,6 +239,7 @@ function checkFields(raw: Record<string, unknown>): { doc: JobDocument } | { err
     plan: null,
     sawCncOverrides: strings('sawCncOverrides', (v): v is 'saw' | 'cnc' => v === 'saw' || v === 'cnc'),
     progress: {},
+    idAliases: strings('idAliases', (v): v is string => typeof v === 'string'),
   };
   const progress = raw['progress'] ?? {};
   if (isRecord(progress) && Object.values(progress).every(isPartTicks)) doc.progress = progress as Progress;

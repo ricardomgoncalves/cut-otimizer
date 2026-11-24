@@ -48,6 +48,7 @@ import { createDexieJobStore } from './job-store-dexie.ts';
 import { JobList } from './JobList.tsx';
 import { PartDetail } from './PartDetail.tsx';
 import { ProgressPanel } from './ProgressPanel.tsx';
+import { ScanMode } from './ScanMode.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
 import { ManualOpsList, SideBView } from './SideBView.tsx';
@@ -97,7 +98,7 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [storeError, setStoreError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [view, setView] = useState<'job' | 'settings'>('job');
+  const [view, setView] = useState<'job' | 'settings' | 'scan'>('job');
   const [codeError, setCodeError] = useState<string | null>(null);
   /** An untick waiting for confirmation because it would unlock these Board and Blank ids. */
   const [pendingUntick, setPendingUntick] = useState<{ partId: string; step: Step; unlocks: string[] } | null>(null);
@@ -381,6 +382,15 @@ export function App() {
           }}
         >
           Machine settings
+        </button>{' '}
+        <button
+          type="button"
+          aria-pressed={view === 'scan'}
+          onClick={() => {
+            setView('scan');
+          }}
+        >
+          Scan mode
         </button>
       </nav>
     </>
@@ -391,6 +401,28 @@ export function App() {
       <main>
         {header}
         <SettingsScreen settings={settings} sheets={open?.model.sheets ?? []} onSave={onSaveSettings} />
+      </main>
+    );
+  }
+
+  if (view === 'scan') {
+    return (
+      <main>
+        {header}
+        {open && job ? (
+          <ScanMode
+            job={job}
+            progress={progress}
+            shortId={open.doc.shortId}
+            aliases={open.doc.idAliases}
+            whereOf={(id) => whereById.get(id)}
+            onTicked={(next) => {
+              save(withProgress(open.doc, next, now()), open.model, job);
+            }}
+          />
+        ) : (
+          <p>Open a planned Job to scan its labels.</p>
+        )}
       </main>
     );
   }

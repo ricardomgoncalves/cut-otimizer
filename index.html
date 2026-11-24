@@ -92,6 +92,51 @@
         padding: 2px 8px;
         border-bottom: 1px solid var(--waste-bg);
       }
+      .step-choice {
+        margin-right: 1rem;
+        font-size: 1.25rem;
+      }
+      .scan-video {
+        display: block;
+        width: 100%;
+        max-width: 480px;
+      }
+      .scan-feedback {
+        margin: 1rem 0;
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+        border: 4px solid var(--waste-bg);
+        font-size: 1.5rem;
+      }
+      .scan-feedback p {
+        margin: 0.25rem 0;
+      }
+      .scan-feedback.ok {
+        border-color: var(--part);
+        background: var(--saw-bg);
+      }
+      .scan-feedback.warn {
+        border-color: var(--warn);
+        background: var(--warn-bg);
+      }
+      .scan-feedback.error {
+        border-color: var(--error);
+        color: var(--error);
+      }
+      .scan-headline {
+        font-size: 2.5rem;
+        font-weight: bold;
+      }
+      .scan-part {
+        font-size: 2rem;
+      }
+      .scan-where {
+        font-family: ui-monospace, monospace;
+      }
+      .scan-warning {
+        color: var(--warn);
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
