@@ -13,7 +13,7 @@
 import { freeSheetCode } from './import/index.ts';
 import type { JobDocument } from './job-store/document.ts';
 import type { CncOp, ManualOp, Model, Owner, Part, PartEdges, Sheet } from './model.ts';
-import type { Plan } from './planner/index.ts';
+import { livePartIds, type Plan } from './planner/index.ts';
 import { boardId } from './progress.ts';
 
 export type Category = 'same' | 'renamed' | 'changedCut' | 'changedFinishing' | 'added' | 'removed';
@@ -426,10 +426,7 @@ function withWhere(where: string | undefined): { where?: string } {
 /** Old Part id -> position in the current Plan's Run order. Parts on no Board follow, in export order. */
 function oldRunOrder(job: DiffJob): Map<string, number> {
   const ids = (job.plan?.sheets ?? []).flatMap((sheet) => [
-    ...sheet.boards.flatMap((board) => [
-      ...board.blanks.flatMap((blank) => blank.parts.map((p) => p.partId)),
-      ...board.sawParts.map((p) => p.partId),
-    ]),
+    ...sheet.boards.flatMap(livePartIds),
     ...sheet.unplaced,
   ]);
   const order = new Map<string, number>();
@@ -442,8 +439,11 @@ function locations(plan: Plan | null): Map<string, string> {
   const where = new Map<string, string>();
   for (const sheet of plan?.sheets ?? []) {
     for (const board of sheet.boards) {
-      for (const blank of board.blanks) for (const p of blank.parts) where.set(p.partId, `${blank.id} #${String(p.n)}`);
-      for (const p of board.sawParts) where.set(p.partId, `Saw · ${boardId(sheet, board)}`);
+      // A Remake Part greyed on its old Blank (#37) is not cut there any more.
+      for (const blank of board.blanks) {
+        for (const p of blank.parts) if (!p.remade) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+      }
+      for (const p of board.sawParts) if (!p.remade) where.set(p.partId, `Saw · ${boardId(sheet, board)}`);
     }
   }
   return where;

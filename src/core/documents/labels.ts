@@ -188,9 +188,9 @@ export function labelOrder(plan: Plan): LabelEntry[] {
   const cnc: LabelEntry[] = [];
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
-      for (const p of board.sawParts) saw.push({ partId: p.partId, where: `Saw · ${sheet.code} Board ${String(board.number)}` });
+      for (const p of board.sawParts.filter((x) => !x.remade)) saw.push({ partId: p.partId, where: `Saw · ${sheet.code} Board ${String(board.number)}` });
       for (const blank of board.blanks) {
-        for (const p of [...blank.parts].sort((a, b) => a.n - b.n)) cnc.push({ partId: p.partId, where: `${blank.id} #${String(p.n)}` });
+        for (const p of blank.parts.filter((x) => !x.remade).sort((a, b) => a.n - b.n)) cnc.push({ partId: p.partId, where: `${blank.id} #${String(p.n)}` });
       }
     }
     for (const id of sheet.unplaced) saw.push({ partId: id, where: 'Saw · too big for a Board' });

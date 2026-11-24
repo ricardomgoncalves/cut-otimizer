@@ -1,7 +1,7 @@
 // Shared pieces of the cut sheet's pages: the work-page header, the numbered sections (the cover's
 // "Order of work"), Part Run order and locations, and the cells every Part table repeats.
 import type { Model, Part, PartEdge } from '../model.ts';
-import type { Blank, Plan } from '../planner/index.ts';
+import { livePartIds, type Blank, type Plan, type SheetPlan } from '../planner/index.ts';
 import { steps, type Step } from '../progress.ts';
 import { sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, GREY, MARGIN, text, type Cell, type Column } from './layout.ts';
@@ -64,29 +64,46 @@ export function sectionNumber(plan: Plan, model: Model, section: Section): strin
 
 export const isBanded = (model: Model) => model.parts.some((p) => bandedEdges(p).length > 0);
 
-/** Every Part id in Run order: per Sheet and Board, the Blanks' Parts (letter, `#n`), then the Board's Saw Parts; unplaced last. */
+/**
+ * Every Part id in Run order: per Sheet and Board, the Blanks' Parts (letter, `#n`), then the Board's Saw Parts;
+ * unplaced, then Parts waiting to be nested (a Remake not nested again yet, overflow) last. A Remake Part greyed
+ * on its old Blank is not listed there.
+ */
 export function partRunOrder(plan: Plan): string[] {
+  const live = new Set(plan.sheets.flatMap((s) => s.boards.flatMap(livePartIds)));
   return plan.sheets.flatMap((sheet) => [
-    ...sheet.boards.flatMap((board) => [
-      ...board.blanks.flatMap((blank) => blank.parts.map((p) => p.partId)),
-      ...board.sawParts.map((p) => p.partId),
-    ]),
+    ...sheet.boards.flatMap(livePartIds),
     ...sheet.unplaced,
+    ...waitingIds(sheet, live),
   ]);
+}
+
+/** A Sheet's Parts on no Board that need nesting: greyed Remakes not placed again, then overflow. */
+function waitingIds(sheet: SheetPlan, live: Set<string>): string[] {
+  const greyed = sheet.boards.flatMap((b) => [
+    ...b.blanks.flatMap((x) => x.parts.filter((p) => p.remade).map((p) => p.partId)),
+    ...b.sawParts.filter((p) => p.remade).map((p) => p.partId),
+  ]);
+  return [...new Set([...greyed, ...(sheet.overflow ?? [])])].filter((id) => !live.has(id));
 }
 
 /**
  * Where each Part is cut, as printed across pages: `W18-1-A #3` on a Blank, `W18-1 saw` for a Saw Part
- * of Board W18-1, `W18 saw, no Board` for a Saw Part too big for any Board.
+ * of Board W18-1, `W18 saw, no Board` for a Saw Part too big for any Board, `needs nesting` for a Part
+ * waiting to be nested. A Remake Part greyed on its old Blank is not "there".
  */
 export function partLocations(plan: Plan): Map<string, string> {
   const where = new Map<string, string>();
+  const live = new Set(plan.sheets.flatMap((s) => s.boards.flatMap(livePartIds)));
   for (const sheet of plan.sheets) {
     for (const board of sheet.boards) {
-      for (const blank of board.blanks) for (const p of blank.parts) where.set(p.partId, `${blank.id} #${String(p.n)}`);
-      for (const p of board.sawParts) where.set(p.partId, `${sheet.code}-${String(board.number)} saw`);
+      for (const blank of board.blanks) {
+        for (const p of blank.parts) if (!p.remade) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+      }
+      for (const p of board.sawParts) if (!p.remade) where.set(p.partId, `${sheet.code}-${String(board.number)} saw`);
     }
     for (const id of sheet.unplaced) where.set(id, `${sheet.code} saw, no Board`);
+    for (const id of waitingIds(sheet, live)) where.set(id, 'needs nesting');
   }
   return where;
 }
