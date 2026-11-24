@@ -291,5 +291,15 @@
       "ops": []
     }
   ],
-  "skipped": []
+  "skipped": [
+    {
+      "kind": "cabinet",
+      "id": "c2",
+      "label": "T2",
+      "roomId": "r1",
+      "name": "Tall pantry",
+      "reason": "invalid",
+      "problems": ["check.minWidth"]
+    }
+  ]
 }

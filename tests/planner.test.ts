@@ -166,6 +166,8 @@ function randomModel(seed: number, count: number): Model {
   const parts: Part[] = Array.from({ length: count }, (_, i) => ({
     id: `p${String(i)}`,
     name: 'panel',
+    partName: `Panel ${String(i + 1)}`,
+    displayName: `R1 · Panel ${String(i + 1)}`,
     ownerId: 'c1',
     sheetId: random() < 0.7 ? 's1' : 's2',
     thickness: 18000,
