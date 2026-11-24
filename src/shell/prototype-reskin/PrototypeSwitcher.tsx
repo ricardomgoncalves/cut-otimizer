@@ -10,6 +10,10 @@ export function PrototypeSwitcher(props: { variants: readonly (readonly [string,
   const go = (d: number) => {
     const next = variants[(i + d + variants.length) % variants.length];
     if (!next) return;
+    if (import.meta.env.MODE === 'prototype') {
+      window.location.hash = next[0]; // artifact frames keep only a plain #name
+      return;
+    }
     const url = new URL(window.location.href);
     url.searchParams.set('variant', next[0]);
     window.history.replaceState(null, '', url);
