@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
 import type { Model, Part } from '../src/core/model.ts';
@@ -305,6 +305,19 @@ describe('plan', () => {
       hasCncOps: true,
     });
   });
+
+  // Every Parts Export in fixtures/ (the synthetic one, and the real one once it is added).
+  it.each(readdirSync(new URL('../fixtures/', import.meta.url)).filter((f) => f.endsWith('.json')))(
+    'holds the invariants and Run order on fixtures/%s',
+    (file) => {
+      const json: unknown = JSON.parse(readFileSync(new URL(`../fixtures/${file}`, import.meta.url), 'utf8'));
+      const { model } = importExport(json);
+      if (!model) throw new Error(`${file} must import`);
+      const result = plan(model, DEFAULT_SETTINGS);
+      expectInvariants(model, result, DEFAULT_SETTINGS);
+      expectRunOrder(model, result);
+    },
+  );
 
   it('holds the Run order on the synthetic fixture', () => {
     const model = syntheticModel();
