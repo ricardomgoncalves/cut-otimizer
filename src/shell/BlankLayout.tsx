@@ -5,10 +5,12 @@ interface Props {
   clampMargin: number;
   /** A Part's display name (`<Owner label> · <Part name>`) from its id. */
   nameOf: (partId: string) => string;
+  /** The Side B file id of a Flip Part (drawn shaded); undefined for other Parts. */
+  sideBOf: (partId: string) => string | undefined;
 }
 
 /** A plain SVG of one Blank's Layout: front edge at the bottom, X to the right, in mm. */
-export function BlankLayout({ blank, clampMargin, nameOf }: Props) {
+export function BlankLayout({ blank, clampMargin, nameOf, sideBOf }: Props) {
   const mm = (um: number) => um / 1000;
   const L = mm(blank.length);
   const W = mm(blank.width);
@@ -40,15 +42,18 @@ export function BlankLayout({ blank, clampMargin, nameOf }: Props) {
         const h = mm(p.rotated ? p.cutLength : p.cutWidth);
         const x = mm(p.x);
         const y = flipY(mm(p.y), h);
+        const sideB = sideBOf(p.partId);
+        const classes = [p.narrow ? 'narrow' : '', sideB === undefined ? '' : 'flip'].join(' ').trim();
+        const notes = `${p.narrow ? ' (narrow: check tabs)' : ''}${sideB === undefined ? '' : ` (Flip Part: Side B ${sideB})`}`;
         return (
-          <g key={p.partId} className={p.narrow ? 'narrow' : undefined}>
-            <title>{`#${String(p.n)} ${nameOf(p.partId)}${p.narrow ? ' (narrow: check tabs)' : ''}`}</title>
+          <g key={p.partId} className={classes || undefined}>
+            <title>{`#${String(p.n)} ${nameOf(p.partId)}${notes}`}</title>
             <rect
               x={x}
               y={y}
               width={w}
               height={h}
-              fill="var(--part-bg)"
+              fill={sideB === undefined ? 'var(--part-bg)' : 'var(--flip-bg)'}
               stroke={p.narrow ? 'var(--warn)' : 'var(--part)'}
               strokeWidth={p.narrow ? 4 : 2}
               strokeDasharray={p.narrow ? '10 5' : undefined}

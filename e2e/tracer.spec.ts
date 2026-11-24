@@ -9,6 +9,10 @@ async function loadAndPlan(page: Page) {
   await page.getByRole('button', { name: 'Plan' }).click();
 }
 
+async function shortIdOf(page: Page): Promise<string> {
+  return (await page.getByText(/^Short id/).locator('code').textContent()) ?? '';
+}
+
 async function downloadZip(page: Page): Promise<Record<string, string>> {
   const [download] = await Promise.all([
     page.waitForEvent('download'),
@@ -30,13 +34,17 @@ test('load the synthetic export, see its Blanks and download the Side A DXFs', a
   await expect(page.getByRole('img', { name: 'Layout of O16-1-A' })).toBeVisible();
 
   const first = await downloadZip(page);
-  expect(Object.keys(first)).toEqual(['W18-1-A.side-a.dxf', 'O16-1-A.side-a.dxf']);
+  const shortId = await shortIdOf(page);
+  expect(Object.keys(first)).toEqual(['W18-1-A.side-a.dxf', 'O16-1-A.side-a.dxf', `${shortId}-B1.side-b.dxf`]);
   expect(first['W18-1-A.side-a.dxf']).toContain('OUTLINE_THRU');
 
-  // Loading the same export again gives byte-identical DXFs.
+  // Loading the same export again gives byte-identical DXFs. It is a new Job, so Side B files take its short id.
   await page.reload();
   await loadAndPlan(page);
-  expect(await downloadZip(page)).toEqual(first);
+  const second = await downloadZip(page);
+  const renamed = (files: Record<string, string>, id: string) =>
+    Object.fromEntries(Object.entries(files).map(([name, text]) => [name.replace(`${id}-`, 'JOB-'), text]));
+  expect(renamed(second, await shortIdOf(page))).toEqual(renamed(first, shortId));
   expect(errors).toEqual([]);
 });
 

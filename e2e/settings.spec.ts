@@ -92,7 +92,10 @@ test('an edited Sheet code shows up in Blank ids and file names', async ({ page 
   await code.press('Enter');
 
   await expect(page.getByRole('img', { name: 'Layout of WH18-1-A' })).toBeVisible();
-  expect(Object.keys(await downloadZip(page))).toEqual(['WH18-1-A.side-a.dxf', 'O16-1-A.side-a.dxf']);
+  expect(Object.keys(await downloadZip(page)).filter((n) => n.endsWith('.side-a.dxf'))).toEqual([
+    'WH18-1-A.side-a.dxf',
+    'O16-1-A.side-a.dxf',
+  ]);
 
   await code.fill('O16');
   await code.press('Enter');

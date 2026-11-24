@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { APP_NAME } from '../core/app.ts';
-import { toDxfFiles } from '../core/dxf/index.ts';
+import { sideBFileName, toDxfFiles } from '../core/dxf/index.ts';
 import { importExport, type ImportIssue } from '../core/import/index.ts';
 import {
   generateJob,
@@ -25,7 +25,7 @@ import {
 } from '../core/job-store/document.ts';
 import type { JobSummary } from '../core/job-store/store.ts';
 import type { Model, Part } from '../core/model.ts';
-import type { PartMode, SawReason, SheetPlan } from '../core/planner/index.ts';
+import type { PartMode, SawReason, SheetPlan, SideBFile } from '../core/planner/index.ts';
 import type { Settings } from '../core/settings.ts';
 import { BlankLayout } from './BlankLayout.tsx';
 import { BoardBreakdown } from './BoardBreakdown.tsx';
@@ -36,6 +36,7 @@ import { JobList } from './JobList.tsx';
 import { PartDetail } from './PartDetail.tsx';
 import { SETTING_LABELS } from './setting-labels.ts';
 import { SettingsScreen } from './SettingsScreen.tsx';
+import { ManualOpsList, SideBView } from './SideBView.tsx';
 import { loadSettings, saveSettings } from './settings-store.ts';
 
 /** Every Job lives in IndexedDB; every change to the open Job is saved straight away. */
@@ -291,8 +292,15 @@ export function App() {
 
   function onDownload() {
     if (!open?.job) return;
-    const zip = zipFiles(toDxfFiles(open.job.plan));
+    const zip = zipFiles(toDxfFiles(open.job.plan, open.doc.shortId));
     downloadBytes(zip, `${safeFileName(open.model.projectName)}.dxf.zip`, 'application/zip');
+  }
+
+  function onDownloadSideB(file: SideBFile) {
+    if (!open?.job) return;
+    const name = sideBFileName(open.doc.shortId, file);
+    const text = toDxfFiles(open.job.plan, open.doc.shortId).get(name);
+    if (text !== undefined) downloadBytes(new TextEncoder().encode(text), name, 'application/dxf');
   }
 
   function onDownloadJob() {
@@ -306,6 +314,9 @@ export function App() {
   const schemaErrors = issues.filter((i) => i.kind === 'schema');
   const partById = new Map<string, Part>(job?.model.parts.map((p) => [p.id, p]) ?? []);
   const nameOf = (id: string) => partById.get(id)?.displayName ?? id;
+  const sideBById = new Map(job?.plan.sideB.flatMap((f) => f.partIds.map((id) => [id, f.id])) ?? []);
+  const sideBOf = (id: string) => sideBById.get(id);
+  const whereById = job ? partLocations(job.plan.sheets) : new Map<string, string>();
   const changed = job ? snapshotChanges(job, settings) : [];
 
   const header = (
@@ -433,6 +444,7 @@ export function App() {
               {codeError}
             </p>
           )}
+          <ManualOpsList ops={job.plan.manualOps} nameOf={nameOf} />
           {job.plan.sheets.map((sheet) => (
             <section key={sheet.sheetId}>
               <h3>
@@ -458,7 +470,12 @@ export function App() {
                       <strong>{blank.id}</strong> · {blank.length / 1000} × {blank.width / 1000} mm ·{' '}
                       {blank.parts.length} Part(s)
                     </figcaption>
-                    <BlankLayout blank={blank} clampMargin={job.plan.settings.clampMargin} nameOf={nameOf} />
+                    <BlankLayout
+                      blank={blank}
+                      clampMargin={job.plan.settings.clampMargin}
+                      nameOf={nameOf}
+                      sideBOf={sideBOf}
+                    />
                     <ol>
                       {blank.parts.map((p) => {
                         const part = partById.get(p.partId);
@@ -485,6 +502,13 @@ export function App() {
               <PartList model={job.model} sheet={sheet} onMode={onPartMode} />
             </section>
           ))}
+          <SideBView
+            files={job.plan.sideB}
+            job={open?.doc.shortId ?? ''}
+            nameOf={nameOf}
+            whereOf={(id) => whereById.get(id)}
+            onDownload={onDownloadSideB}
+          />
         </>
       )}
     </main>
@@ -546,6 +570,19 @@ function JobNameField(props: { name: string; onCommit: (name: string) => void })
       </label>
     </form>
   );
+}
+
+/** Where each Part is cut, Job-wide: `W18-1-A #1` on a Blank, `Saw · Board 1` for a Saw Part. */
+function partLocations(sheets: SheetPlan[]): Map<string, string> {
+  const where = new Map<string, string>();
+  for (const sheet of sheets) {
+    for (const board of sheet.boards) {
+      for (const blank of board.blanks) for (const p of blank.parts) where.set(p.partId, `${blank.id} #${String(p.n)}`);
+      for (const p of board.sawParts) where.set(p.partId, `Saw · ${sheet.code} Board ${String(board.number)}`);
+    }
+    for (const id of sheet.unplaced) where.set(id, 'Saw · too big for a Board');
+  }
+  return where;
 }
 
 const SAW_REASONS: Record<SawReason, string> = {
