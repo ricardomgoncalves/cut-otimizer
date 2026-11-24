@@ -2,7 +2,15 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { importExport } from '../src/core/import/index.ts';
 import type { Model, Part } from '../src/core/model.ts';
-import { partRule, plan, type Blank, type Board, type Plan } from '../src/core/planner/index.ts';
+import {
+  discardOffcut,
+  partRule,
+  plan,
+  remakePart,
+  type Blank,
+  type Board,
+  type Plan,
+} from '../src/core/planner/index.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
 
 function syntheticModel(): Model {
@@ -46,16 +54,22 @@ function expectInvariants(
   locked?: { settings: Settings; boards: Set<string> },
 ) {
 
-  // Every Part placed exactly once, as a CNC Part or a Saw Part.
+  // Every Part placed exactly once, as a CNC Part or a Saw Part, or waiting for a Board. A Remake Part
+  // also stays greyed (remade) where it was cut before.
   const placed = [
-    ...allBlanks(result).flatMap((b) => b.parts.map((p) => p.partId)),
+    ...allBlanks(result).flatMap((b) => b.parts.filter((p) => !p.remade).map((p) => p.partId)),
     ...result.sheets.flatMap((s) => s.sawParts),
+    ...result.sheets.flatMap((s) => (s.overflow ?? []).filter((id) => !s.sawParts.includes(id))),
   ].sort();
   expect(placed).toEqual(model.parts.map((p) => p.id).sort());
 
   for (const sheet of result.sheets) {
-    // Each Saw Part is on exactly one Board (or too big for any Board of its Sheet).
-    const sawn = [...sheet.boards.flatMap((b) => b.sawParts.map((p) => p.partId)), ...sheet.unplaced].sort();
+    // Each Saw Part is on exactly one Board (or too big for any Board of its Sheet, or waiting for a Board).
+    const sawn = [
+      ...sheet.boards.flatMap((b) => b.sawParts.filter((p) => !p.remade).map((p) => p.partId)),
+      ...sheet.unplaced,
+      ...(sheet.overflow ?? []).filter((id) => sheet.sawParts.includes(id)),
+    ].sort();
     expect(sawn).toEqual([...sheet.sawParts].sort());
     // Every Saw Part piece has the Part's size.
     for (const board of sheet.boards) {
@@ -82,8 +96,28 @@ function expectInvariants(
       const pieces: (Rect & { name: string })[] = [
         ...board.blanks.map((b) => ({ ...b, name: b.id })),
         ...board.sawParts.map((p) => ({ ...p, name: p.partId })),
-        ...board.offcuts.map((o, i) => ({ ...o, name: `offcut ${String(i)}` })),
+        ...board.offcuts.map((o, i) => ({ ...o, name: o.id ?? `offcut ${String(i)}` })),
       ];
+      // A kept Offcut cut up later holds its new Blanks and leftovers, each wholly inside it.
+      const used = board.offcuts.filter((o) => o.used);
+      const parentOf = (r: Rect & { name: string }) =>
+        used.find(
+          (o) =>
+            o.id !== r.name &&
+            r.x >= o.x &&
+            r.y >= o.y &&
+            r.x + r.length <= o.x + o.length &&
+            r.y + r.width <= o.y + o.width,
+        );
+      for (const blank of board.blanks.filter((b) => b.from)) {
+        expect(parentOf({ ...blank, name: blank.id })?.id, blank.id).toBe(blank.from);
+      }
+      const contains = (o: Rect & { name: string }, r: Rect & { name: string }) =>
+        used.some((u) => u.id === o.name) &&
+        r.x >= o.x &&
+        r.y >= o.y &&
+        r.x + r.length <= o.x + o.length &&
+        r.y + r.width <= o.y + o.width;
       for (const r of pieces) {
         expect(r.x, r.name).toBeGreaterThanOrEqual(trim);
         expect(r.y, r.name).toBeGreaterThanOrEqual(trim);
@@ -92,6 +126,7 @@ function expectInvariants(
       }
       pieces.forEach((a, i) => {
         for (const b of pieces.slice(i + 1)) {
+          if (contains(a, b) || contains(b, a)) continue;
           expect(overlaps(a, b, settings.sawKerf), `${a.name} and ${b.name} need kerf between them`).toBe(
             false,
           );
@@ -146,7 +181,8 @@ function expectRunOrder(model: Model, result: Plan, locked = new Set<string>()) 
       );
       board.blanks.slice(1).forEach((b, i) => {
         const prev = board.blanks[i];
-        if (!prev) return;
+        // Blanks cut from a kept Offcut come after the Board's own, in saw order within that Offcut.
+        if (!prev || prev.from !== b.from) return;
         expect(
           prev.y < b.y || (prev.y === b.y && prev.x < b.x),
           `${b.id} comes off the saw after ${prev.id}`,
@@ -399,8 +435,8 @@ describe('plan', () => {
     // 400 × 300 plus the 40 mm clamp margin on each side.
     expect(board?.blanks.map((b) => [b.x, b.y, b.length, b.width])).toEqual([[0, 0, 480000, 380000]]);
     expect(board?.offcuts).toEqual([
-      { x: 483200, y: 0, length: 2800000 - 483200, width: 380000, kept: true },
-      { x: 0, y: 383200, length: 2800000, width: 2070000 - 383200, kept: true },
+      { id: 'W18-1-K1', x: 483200, y: 0, length: 2800000 - 483200, width: 380000, kept: true },
+      { id: 'W18-1-K2', x: 0, y: 383200, length: 2800000, width: 2070000 - 383200, kept: true },
     ]);
     expect(board?.cuts).toEqual([
       { label: '1', kind: 'rip', x: 0, y: 380000, length: 2800000 },
@@ -429,9 +465,9 @@ describe('plan', () => {
     const board = plan(model, { ...DEFAULT_SETTINGS, minOffcutSize: 1500000 }).sheets[0]?.boards[0];
 
     // 1496.8 × 380 beside the Blank is waste; 2800 × 1686.8 behind it is kept.
-    expect(board?.offcuts.map((o) => [o.length, o.width, o.kept])).toEqual([
-      [1496800, 380000, false],
-      [2800000, 1686800, true],
+    expect(board?.offcuts.map((o) => [o.id, o.length, o.width, o.kept])).toEqual([
+      [undefined, 1496800, 380000, false],
+      ['W18-1-K1', 2800000, 1686800, true],
     ]);
   });
 });
@@ -536,6 +572,159 @@ describe('Locked Boards and Blanks', () => {
     expect(allBlanks(result).map((b) => b.clampMargin)).toEqual([55000, 55000]);
   });
 });
+
+describe('Remake, kept Offcuts and the needs-nesting order', () => {
+  /** Two 400 × 300 Parts on one Blank of W18 Board 1. */
+  function twoParts(): { model: Model; before: Plan } {
+    const model = randomModel(1, 2);
+    model.parts = model.parts.map((p) => ({
+      ...p,
+      sheetId: 's1',
+      cutLength: 400000,
+      cutWidth: 300000,
+      grain: 'length' as const,
+    }));
+    return { model, before: plan(model, DEFAULT_SETTINGS) };
+  }
+  const board1 = (result: Plan) => result.sheets[0]?.boards.find((b) => b.number === 1);
+  const inside = (r: Rect, o: Rect) =>
+    r.x >= o.x && r.y >= o.y && r.x + r.length <= o.x + o.length && r.y + r.width <= o.y + o.width;
+
+  it('greys a Remake Part on its old Blank and nests it on a fitting kept Offcut of the Locked Board', () => {
+    const { model, before } = twoParts();
+    const old = board1(before);
+    expect(old?.blanks.map((b) => b.parts.length)).toEqual([2]);
+    const k1 = old?.offcuts.find((o) => o.id === 'W18-1-K1');
+    if (!old || !k1) throw new Error('needs Board 1 with K1');
+
+    const after = plan(model, DEFAULT_SETTINGS, { plan: remakePart(before, 'p1'), cut: ['p0'] });
+    const board = board1(after);
+
+    // The old Blank keeps both Parts where they were, the Remake one greyed (remade).
+    expect(board?.blanks[0]).toEqual({
+      ...old.blanks[0],
+      parts: old.blanks[0]?.parts.map((p) => (p.partId === 'p1' ? { ...p, remade: true } : p)),
+    });
+    // A new Blank, continuing the Board's letters, cut from K1.
+    const blank = board?.blanks[1];
+    expect(blank?.id).toBe('W18-1-B');
+    expect(blank?.from).toBe('W18-1-K1');
+    expect(blank?.parts.map((p) => p.partId)).toEqual(['p1']);
+    if (!blank) throw new Error('needs the new Blank');
+    expect(inside(blank, k1)).toBe(true);
+    // K1 is used up; what's left of it is new Offcuts, kept ones numbered on from the Board's last K.
+    expect(board?.offcuts.find((o) => o.id === 'W18-1-K1')).toEqual({ ...k1, used: true });
+    const rest = board?.offcuts.slice(old.offcuts.length) ?? [];
+    expect(rest.length).toBeGreaterThan(0);
+    for (const o of rest) expect(inside(o, k1)).toBe(true);
+    const keptBefore = old.offcuts.filter((x) => x.kept).length;
+    expect(rest.filter((o) => o.kept).map((o) => o.id)).toEqual(
+      rest.filter((o) => o.kept).map((_, i) => `W18-1-K${String(keptBefore + i + 1)}`),
+    );
+    // Its own saw entries, from K1.
+    const extra = board?.cuts.slice(old.cuts.length) ?? [];
+    expect(extra.length).toBeGreaterThan(0);
+    for (const c of extra) expect(c.from).toBe('W18-1-K1');
+    // No new Board, nothing waiting.
+    expect(after.sheets[0]?.boards.map((b) => b.number)).toEqual([1]);
+    expect(after.sheets[0]?.overflow).toEqual([]);
+  });
+
+  it('ignores discarded Offcuts, and Discard can be undone', () => {
+    const { model, before } = twoParts();
+    const after = plan(model, DEFAULT_SETTINGS, {
+      plan: remakePart(discardOffcut(before, 'W18-1-K1', true), 'p1'),
+      cut: ['p0'],
+    });
+
+    expect(board1(after)?.blanks[1]?.from).toBe('W18-1-K2');
+    expect(board1(after)?.offcuts.find((o) => o.id === 'W18-1-K1')).toMatchObject({ discarded: true });
+    expect(discardOffcut(discardOffcut(before, 'W18-1-K1', true), 'W18-1-K1', false)).toEqual(before);
+  });
+
+  it('asks before adding a Board when no kept Offcut or unlocked Board fits, and adds it when allowed', () => {
+    const { model, before } = twoParts();
+    let marked = remakePart(before, 'p1');
+    for (const o of board1(before)?.offcuts ?? []) if (o.id) marked = discardOffcut(marked, o.id, true);
+
+    const asked = plan(model, DEFAULT_SETTINGS, { plan: marked, cut: ['p0'] });
+    expect(asked.sheets[0]?.boards.map((b) => b.number)).toEqual([1]);
+    expect(asked.sheets[0]?.overflow).toEqual(['p1']);
+    expect(asked.sheets[0]?.extraBoards).toBe(1);
+
+    const added = plan(model, DEFAULT_SETTINGS, { plan: asked, cut: ['p0'], addBoards: ['s1'] });
+    expect(added.sheets[0]?.boards.map((b) => b.number)).toEqual([1, 2]);
+    expect(added.sheets[0]?.boards[1]?.blanks.flatMap((b) => b.parts.map((p) => p.partId))).toEqual(['p1']);
+    expect(added.sheets[0]?.overflow).toEqual([]);
+  });
+
+  it('falls through to the Breakdown of the unlocked Boards, ignoring their Offcuts', () => {
+    // Board 1 Locked with every Offcut discarded, later Boards unlocked: an added Part goes into their Breakdown.
+    const model = randomModel(5, 60);
+    const before = plan(model, DEFAULT_SETTINGS);
+    const sheet = before.sheets[0];
+    const first = sheet?.boards[0];
+    if (!first || !sheet || sheet.boards.length < 2) throw new Error('needs two W18 Boards');
+    let marked = before;
+    for (const o of first.offcuts) if (o.id) marked = discardOffcut(marked, o.id, true);
+    const added: Part = { ...(model.parts[0] as Part), id: 'added', sheetId: 's1', cutLength: 300000, cutWidth: 200000 };
+
+    const after = plan({ ...model, parts: [...model.parts, added] }, DEFAULT_SETTINGS, {
+      plan: marked,
+      cut: boardPartIds(first),
+    });
+    const where = after.sheets[0]?.boards.find((b) => b.blanks.some((x) => x.parts.some((p) => p.partId === 'added')));
+    expect(where?.number).not.toBe(1);
+    expect(where?.blanks.every((b) => b.from === undefined)).toBe(true);
+    expect(after.sheets[0]?.boards.length).toBe(sheet.boards.length);
+    expect(after.sheets[0]?.overflow).toEqual([]);
+  });
+
+  it('gives a brand-new Sheet its Boards without asking', () => {
+    const { model, before } = twoParts();
+    const oak: Part = { ...(model.parts[0] as Part), id: 'oak', sheetId: 's2' };
+    const after = plan({ ...model, parts: [...model.parts, oak] }, DEFAULT_SETTINGS, { plan: before, cut: ['p0'] });
+
+    expect(after.sheets[1]?.boards.map((b) => b.number)).toEqual([1]);
+    expect(after.sheets[1]?.overflow).toEqual([]);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6])('holds the invariants after Remakes onto Offcuts (random export %i)', (seed) => {
+    const model = randomModel(seed, 40);
+    const before = plan(model, DEFAULT_SETTINGS);
+    const random = rng(seed * 7);
+    const cut = boardsOf(before)
+      .flatMap((b) => b.blanks.flatMap((x) => x.parts.map((p) => p.partId)))
+      .filter(() => random() < 0.2);
+    const remade = cut.filter(() => random() < 0.5);
+    const marked = remade.reduce(remakePart, before);
+    const after = plan(model, DEFAULT_SETTINGS, {
+      plan: marked,
+      cut: cut.filter((id) => !remade.includes(id)),
+      addBoards: ['s1', 's2'],
+    });
+
+    expectInvariants(model, after, DEFAULT_SETTINGS);
+    // Locked Boards keep all they had, only gaining Blanks and Offcuts cut from kept Offcuts.
+    for (const sheet of marked.sheets) {
+      for (const old of sheet.boards) {
+        if (!boardPartIds(old).some((id) => cut.includes(id))) continue;
+        const kept = after.sheets
+          .find((s) => s.sheetId === sheet.sheetId)
+          ?.boards.find((b) => b.number === old.number);
+        expect(kept?.blanks.slice(0, old.blanks.length)).toEqual(old.blanks);
+        expect(kept?.sawParts).toEqual(old.sawParts);
+        expect(kept?.cuts.slice(0, old.cuts.length)).toEqual(old.cuts);
+      }
+    }
+  });
+});
+
+const boardsOf = (result: Plan) => result.sheets.flatMap((s) => s.boards);
+const boardPartIds = (b: Board) => [
+  ...b.blanks.flatMap((x) => x.parts.map((p) => p.partId)),
+  ...b.sawParts.map((p) => p.partId),
+];
 
 /** A small seeded PRNG (mulberry32) so random exports are reproducible. */
 function rng(seed: number) {

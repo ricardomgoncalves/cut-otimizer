@@ -47,6 +47,11 @@ export interface Placement {
   ops: CncOp[];
   /** Narrower than Min CNC width but kept on the CNC: warn (check tabs). */
   narrow: boolean;
+  /**
+   * Marked Remake: the Part was cut here and ruined. It stays where it was (greyed out), so its Locked
+   * Blank and its DXF don't change, but it is planned again elsewhere and counts nowhere here.
+   */
+  remade?: boolean;
 }
 
 export interface Blank {
@@ -58,6 +63,8 @@ export interface Blank {
   y: number;
   length: number;
   width: number;
+  /** Cut from this kept Offcut of its (Locked) Board at a later regenerate, e.g. `W18-1-K1`. */
+  from?: string;
   /**
    * The clamp margin its Parts were nested inside. The Planner always sets it, so a Locked Blank kept
    * from an earlier Plan keeps its own margin; a hand-written Blank without it uses `plan.settings`.
@@ -81,15 +88,26 @@ export interface SawPlacement {
   /** Turned 90°: the Part's X runs along the Board's Y. */
   rotated: boolean;
   reason: SawReason;
+  /** Marked Remake: stays here greyed out, and is planned again elsewhere. */
+  remade?: boolean;
 }
 
-/** A leftover piece of the Breakdown. `kept` when at least Min Offcut size on both sides. */
+/**
+ * A leftover piece of the Breakdown. `kept` when at least Min Offcut size on both sides: then it has an
+ * id (`W18-1-K1`) and is stock for Parts that need nesting, while its Board is Locked.
+ */
 export interface Offcut {
+  /** Kept Offcuts only: `<Board id>-K<n>`, numbered per Board in saw order. */
+  id?: string;
   x: number;
   y: number;
   length: number;
   width: number;
   kept: boolean;
+  /** Kept, but set aside by hand (undoable): no longer stock. */
+  discarded?: boolean;
+  /** Cut up for new Blanks at a regenerate: what is left of it is listed as Offcuts of its own. */
+  used?: boolean;
 }
 
 /**
@@ -103,6 +121,8 @@ export interface Cut {
   x: number;
   y: number;
   length: number;
+  /** A saw entry of its own, cutting up this kept Offcut (`W18-1-K1`) at a later regenerate. */
+  from?: string;
 }
 
 export interface Board {
@@ -129,6 +149,13 @@ export interface SheetPlan {
   sawReasons: Record<string, SawReason>;
   /** Saw Parts too big for a Board of this Sheet: on no Board. */
   unplaced: string[];
+  /**
+   * Parts that need nesting but fit neither a kept Offcut of a Locked Board nor the Sheet's unlocked
+   * Boards: on no Board until the person agrees to add Boards (`PlanPrior.addBoards`). Export order.
+   */
+  overflow?: string[];
+  /** How many Boards adding them would take (0 when `overflow` is empty). */
+  extraBoards?: number;
 }
 
 export interface Plan {
@@ -155,6 +182,13 @@ export interface PlanPrior {
    * **Locked**: kept with its geometry, Board number, Blank ids and `#n`, and with every Part on it.
    */
   cut?: readonly string[];
+  /**
+   * Sheet ids that may get more Boards than `plan` gave them. Parts that need nesting (on no Board of
+   * `plan`: Remakes, Added Parts…) go first onto kept, non-discarded Offcuts of Locked Boards, then into
+   * the Breakdown of the Sheet's unlocked Boards; a Sheet only gets more Boards than that when listed
+   * here. A Sheet with no Boards in `plan` (or no `plan`) always gets its Boards.
+   */
+  addBoards?: readonly string[];
 }
 
 /** How a Part is cut without any toggle, and whether the toggle applies. */
@@ -171,15 +205,17 @@ export interface PartRule {
 /** Plans every Sheet of the model. Pure and deterministic. */
 export function plan(model: Model, settings: Settings, prior: PlanPrior = {}): Plan {
   const locked = lockedBoards(prior);
-  const sheets = runOrder(model.sheets).map((sheet) =>
-    planSheet(
-      sheet,
-      model.parts.filter((p) => p.sheetId === sheet.id),
-      settings,
-      prior.sawCnc ?? {},
-      locked.get(sheet.id) ?? [],
-    ),
-  );
+  const live = prior.plan ? new Set(prior.plan.sheets.flatMap((s) => [...s.boards.flatMap(livePartIds), ...s.unplaced])) : null;
+  const sheets = runOrder(model.sheets).map((sheet) => {
+    const before = prior.plan?.sheets.find((s) => s.sheetId === sheet.id);
+    return planSheet(sheet, model.parts.filter((p) => p.sheetId === sheet.id), settings, {
+      sawCnc: prior.sawCnc ?? {},
+      locked: locked.get(sheet.id) ?? [],
+      live,
+      // A Sheet without Boards so far is brand-new: it gets its Boards without asking.
+      boardsBefore: before && before.boards.length > 0 && !prior.addBoards?.includes(sheet.id) ? before.boards.length : null,
+    });
+  });
   const { files, manualOps } = sideB(model, settings, partRunOrder(sheets));
   return { settings, sheets, sideB: files, manualOps };
 }
@@ -188,19 +224,79 @@ export function plan(model: Model, settings: Settings, prior: PlanPrior = {}): P
 function lockedBoards(prior: PlanPrior): Map<string, Board[]> {
   const cut = new Set(prior.cut ?? []);
   const out = new Map<string, Board[]>();
-  if (cut.size === 0) return out;
   for (const sheet of prior.plan?.sheets ?? []) {
-    const boards = sheet.boards
-      .filter((b) => boardPartIds(b).some((id) => cut.has(id)))
-      .sort((a, b) => a.number - b.number);
+    const boards = sheet.boards.filter((b) => boardLocked(b, (id) => cut.has(id))).sort((a, b) => a.number - b.number);
     if (boards.length > 0) out.set(sheet.sheetId, boards);
   }
   return out;
 }
 
-/** Every Part cut from a Board: its Blanks' Parts, then its Saw Parts. */
-function boardPartIds(board: Board): string[] {
-  return [...board.blanks.flatMap((b) => b.parts.map((p) => p.partId)), ...board.sawParts.map((p) => p.partId)];
+/** The Parts a Board gives now: its Blanks' Parts, then its Saw Parts, leaving out Remakes (greyed). */
+export function livePartIds(board: Board): string[] {
+  return [
+    ...board.blanks.flatMap((b) => b.parts.filter((p) => !p.remade).map((p) => p.partId)),
+    ...board.sawParts.filter((p) => !p.remade).map((p) => p.partId),
+  ];
+}
+
+/**
+ * Locked: a Part on it is ticked Cut, or a Remake Part was cut from it. A Remake clears the Part's ticks
+ * but its old Blank stays Locked.
+ */
+export function boardLocked(board: Board, isCut: (partId: string) => boolean): boolean {
+  return board.blanks.some((b) => blankLocked(b, isCut)) || board.sawParts.some((p) => p.remade === true || isCut(p.partId));
+}
+
+/** A Blank with a Part ticked Cut, or a Remake Part on it. */
+export function blankLocked(blank: Blank, isCut: (partId: string) => boolean): boolean {
+  return blank.parts.some((p) => p.remade === true || isCut(p.partId));
+}
+
+/**
+ * Marks a Part **Remake** in a Plan: where it is on a Board now, it stays greyed out (`remade`), and the
+ * next plan nests it again. Unchanged when the Part is on no Board.
+ */
+export function remakePart(plan: Plan, partId: string): Plan {
+  const mark = <T extends { partId: string; remade?: boolean }>(p: T): T =>
+    p.partId === partId && !p.remade ? { ...p, remade: true } : p;
+  return mapBoards(plan, (board) =>
+    livePartIds(board).includes(partId)
+      ? {
+          ...board,
+          blanks: board.blanks.map((b) => ({ ...b, parts: b.parts.map(mark) })),
+          sawParts: board.sawParts.map(mark),
+        }
+      : board,
+  );
+}
+
+/** Discards a kept Offcut (no longer stock), or undoes that. Unchanged for an unknown or used Offcut. */
+export function discardOffcut(plan: Plan, offcutId: string, discarded: boolean): Plan {
+  return mapBoards(plan, (board) =>
+    board.offcuts.some((o) => o.id === offcutId && o.kept && !o.used)
+      ? {
+          ...board,
+          offcuts: board.offcuts.map((o) => {
+            if (o.id !== offcutId) return o;
+            const rest: Offcut = Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'discarded')) as Offcut;
+            return discarded ? { ...rest, discarded: true } : rest;
+          }),
+        }
+      : board,
+  );
+}
+
+function mapBoards(plan: Plan, f: (board: Board) => Board): Plan {
+  let changed = false;
+  const sheets = plan.sheets.map((sheet) => {
+    const boards = sheet.boards.map((b) => {
+      const out = f(b);
+      if (out !== b) changed = true;
+      return out;
+    });
+    return boards.some((b, i) => b !== sheet.boards[i]) ? { ...sheet, boards } : sheet;
+  });
+  return changed ? { ...plan, sheets } : plan;
 }
 
 /**
@@ -208,13 +304,7 @@ function boardPartIds(board: Board): string[] {
  * Saw Parts; Saw Parts too big for any Board last in their Sheet.
  */
 function partRunOrder(sheets: SheetPlan[]): string[] {
-  return sheets.flatMap((sheet) => [
-    ...sheet.boards.flatMap((board) => [
-      ...board.blanks.flatMap((blank) => blank.parts.map((p) => p.partId)),
-      ...board.sawParts.map((p) => p.partId),
-    ]),
-    ...sheet.unplaced,
-  ]);
+  return sheets.flatMap((sheet) => [...sheet.boards.flatMap(livePartIds), ...sheet.unplaced, ...(sheet.overflow ?? [])]);
 }
 
 /** The Saw / CNC rule for one Part of the model. */
@@ -226,7 +316,7 @@ export function partRule(model: Model, settings: Settings, partId: string): Part
 }
 
 function ruleFor(part: Part, sheet: Sheet, settings: Settings): PartRule {
-  const { length, width } = largestPiece(sheet, settings);
+  const { length, width } = largestPiece(trimmedArea(sheet, settings), settings);
   const usableL = length - 2 * settings.clampMargin;
   const usableW = width - 2 * settings.clampMargin;
   const fits = (l: number, w: number) => l <= usableL && w <= usableW;
@@ -259,9 +349,8 @@ function trimmedArea(sheet: Sheet, settings: Settings): Area {
   return { x0: trim, y0: trim, x1: sheet.length - trim, y1: sheet.width - trim };
 }
 
-/** The largest Blank a Board of this Sheet gives: the bed, or the trimmed Board if smaller. */
-function largestPiece(sheet: Sheet, settings: Settings) {
-  const a = trimmedArea(sheet, settings);
+/** The largest Blank an area (a trimmed Board, or a kept Offcut) gives: the bed, or the area if smaller. */
+function largestPiece(a: Area, settings: Settings) {
   return {
     length: Math.min(settings.bedLength, a.x1 - a.x0),
     width: Math.min(settings.bedWidth, a.y1 - a.y0),
@@ -273,16 +362,22 @@ interface SawItem {
   reason: SawReason;
 }
 
-function planSheet(
-  sheet: Sheet,
-  parts: Part[],
-  settings: Settings,
-  sawCnc: Record<string, PartMode>,
-  locked: Board[],
-): SheetPlan {
+interface SheetPrior {
+  sawCnc: Record<string, PartMode>;
+  locked: Board[];
+  /** Part ids on a Board (not greyed) or too big for one in the prior Plan; null without a prior Plan. */
+  live: Set<string> | null;
+  /** How many Boards the Sheet had, when it may not get more without asking; null when it may. */
+  boardsBefore: number | null;
+}
+
+function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: SheetPrior): SheetPlan {
+  const { sawCnc, locked } = prior;
   // Parts on a Locked Board stay where they are; a Locked Saw Part keeps its reason.
-  const lockedSaw = new Map(locked.flatMap((b) => b.sawParts.map((p) => [p.partId, p.reason] as const)));
-  const lockedIds = new Set(locked.flatMap(boardPartIds));
+  const lockedSaw = new Map(
+    locked.flatMap((b) => b.sawParts.filter((p) => !p.remade).map((p) => [p.partId, p.reason] as const)),
+  );
+  const lockedIds = new Set(locked.flatMap(livePartIds));
   const cnc: Part[] = [];
   const saw: SawItem[] = [];
   const sawReasons: Record<string, SawReason> = {};
@@ -319,21 +414,59 @@ function planSheet(
     area,
     narrow: new Set(parts.filter((p) => ruleFor(p, sheet, settings).narrow).map((p) => p.id)),
   };
-  let remainingCnc = nestingOrder(cnc);
-  let remainingSaw = sawOrder(saw.filter((s) => fitsBoard(s.part)));
-  const boards: Board[] = [...locked];
-  // New Boards take the next free numbers, after every Locked Board, so they sort last in the Sheet.
-  let number = Math.max(0, ...locked.map((b) => b.number));
+  // Parts on no Board of the prior Plan need nesting: Remakes, Parts added since…
+  const needs = new Set(prior.live ? parts.filter((p) => !prior.live?.has(p.id)).map((p) => p.id) : []);
 
-  while (remainingCnc.length > 0 || remainingSaw.length > 0) {
-    const draft = bestBoard(ctx, remainingCnc, remainingSaw);
-    if (!draft) break; // Cannot happen: every remaining Part fits an empty Board.
-    const board = finishBoard(ctx, draft, ++number);
-    boards.push(board);
-    const used = new Set(draftPartIds(draft));
-    remainingCnc = remainingCnc.filter((p) => !used.has(p.id));
-    remainingSaw = remainingSaw.filter((s) => !used.has(s.part.id));
+  // 1. Kept, non-discarded Offcuts of Locked Boards, for the CNC Parts that need nesting.
+  const onOffcuts = new Set<string>();
+  const boards = locked.map((board) => {
+    let out = board;
+    let waiting = nestingOrder(cnc.filter((p) => needs.has(p.id) && !onOffcuts.has(p.id)));
+    for (let i = 0; i < out.offcuts.length && waiting.length > 0; i++) {
+      const offcut = out.offcuts[i];
+      if (!offcut?.id || !offcut.kept || offcut.used || offcut.discarded) continue;
+      const offCtx: Ctx = {
+        ...ctx,
+        area: { x0: offcut.x, y0: offcut.y, x1: offcut.x + offcut.length, y1: offcut.y + offcut.width },
+      };
+      const draft = bestBoard(offCtx, waiting, []);
+      if (!draft) continue;
+      out = cutOffcut(offCtx, out, offcut.id, draft);
+      for (const id of draftPartIds(draft)) onOffcuts.add(id);
+      waiting = waiting.filter((p) => !onOffcuts.has(p.id));
+    }
+    return out;
+  });
+
+  // 2. The Breakdown of the Sheet's unlocked Boards, with every other Part not on a Locked Board.
+  const cncLeft = cnc.filter((p) => !onOffcuts.has(p.id));
+  const sawLeft = saw.filter((s) => fitsBoard(s.part));
+  const all = draftBoards(ctx, cncLeft, sawLeft);
+  let chosen = all;
+  let overflow: string[] = [];
+  let extraBoards = 0;
+  if (prior.boardsBefore !== null && needs.size > 0) {
+    // 3. More Boards than the Sheet had (or than its other Parts need now) only when the person agrees.
+    const regular = draftBoards(
+      ctx,
+      cncLeft.filter((p) => !needs.has(p.id)),
+      sawLeft.filter((s) => !needs.has(s.part.id)),
+    );
+    const allowed = Math.max(regular.length, prior.boardsBefore - locked.length);
+    if (all.length > allowed) {
+      const beyond = all.slice(allowed).flatMap(draftPartIds);
+      chosen = beyond.every((id) => needs.has(id)) ? all.slice(0, allowed) : regular;
+      const placed = new Set(chosen.flatMap(draftPartIds));
+      const left = [...cncLeft.map((p) => p.id), ...sawLeft.map((s) => s.part.id)];
+      const waiting = new Set(left.filter((id) => !placed.has(id)));
+      overflow = parts.filter((p) => waiting.has(p.id)).map((p) => p.id);
+      extraBoards = all.length - allowed;
+    }
   }
+
+  // New Boards take the next free numbers, after every Locked Board, so they sort last in the Sheet.
+  const first = Math.max(0, ...locked.map((b) => b.number));
+  boards.push(...chosen.map((draft, i) => finishBoard(ctx, draft, first + i + 1)));
 
   return {
     sheetId: sheet.id,
@@ -343,7 +476,25 @@ function planSheet(
     sawParts,
     sawReasons,
     unplaced,
+    overflow,
+    extraBoards,
   };
+}
+
+/** Plans Boards one after another until every Part is on one. */
+function draftBoards(ctx: Ctx, cncIn: Part[], sawIn: SawItem[]): DraftBoard[] {
+  let cnc = nestingOrder(cncIn);
+  let saw = sawOrder(sawIn);
+  const out: DraftBoard[] = [];
+  while (cnc.length > 0 || saw.length > 0) {
+    const draft = bestBoard(ctx, cnc, saw);
+    if (!draft) break; // Cannot happen: every remaining Part fits an empty Board.
+    out.push(draft);
+    const used = new Set(draftPartIds(draft));
+    cnc = cnc.filter((p) => !used.has(p.id));
+    saw = saw.filter((s) => !used.has(s.part.id));
+  }
+  return out;
 }
 
 interface Ctx {
@@ -383,7 +534,7 @@ function draftPartIds(draft: DraftBoard): string[] {
  */
 function bestBoard(ctx: Ctx, cnc: Part[], saw: SawItem[]): DraftBoard | null {
   const { settings } = ctx;
-  const piece = largestPiece(ctx.sheet, settings);
+  const piece = largestPiece(ctx.area, settings);
   const pad = 2 * settings.clampMargin;
   const widths = capCandidates(
     piece.width,
@@ -540,22 +691,76 @@ function offcutsOf(ctx: Ctx, draft: DraftBoard): Offcut[] {
   return out;
 }
 
+/** Gives kept Offcuts their ids `<board>-K<n>`, numbering on from `last`. */
+function withOffcutIds(offcuts: Offcut[], board: string, last: number): Offcut[] {
+  let n = last;
+  return offcuts.map((o) => (o.kept ? { id: `${board}-K${String(++n)}`, ...o } : o));
+}
+
 /** Letters the Blanks in saw order, numbers the cuts and lists the Offcuts. */
 function finishBoard(ctx: Ctx, draft: DraftBoard, number: number): Board {
-  const { area, sheet } = ctx;
+  const { sheet } = ctx;
+  const prefix = `${sheet.code}-${String(number)}`;
+  const { blanks, sawParts, cuts } = breakDown(ctx, draft, { prefix, letters: 0, label: '' });
+  return {
+    number,
+    length: sheet.length,
+    width: sheet.width,
+    blanks,
+    sawParts,
+    offcuts: withOffcutIds(offcutsOf(ctx, draft), prefix, 0),
+    cuts,
+  };
+}
+
+/**
+ * Cuts a kept Offcut of a Locked Board (`ctx.area`) into the Blanks of `draft`. The new Blanks continue
+ * the Board's letters, their cuts are saw entries of their own (`K1.1`, `K1.1a`… from the Offcut's
+ * edges), the Offcut is marked used and what is left of it becomes new Offcuts (kept ones numbered on).
+ */
+function cutOffcut(ctx: Ctx, board: Board, offcutId: string, draft: DraftBoard): Board {
+  const prefix = offcutId.slice(0, offcutId.lastIndexOf('-'));
+  const short = offcutId.slice(prefix.length + 1);
+  const { blanks, sawParts, cuts } = breakDown(ctx, draft, {
+    prefix,
+    letters: board.blanks.length,
+    label: `${short}.`,
+    from: offcutId,
+  });
+  const lastK = Math.max(0, ...board.offcuts.map((o) => Number(/-K(\d+)$/.exec(o.id ?? '')?.[1] ?? 0)));
+  return {
+    ...board,
+    blanks: [...board.blanks, ...blanks],
+    sawParts: [...board.sawParts, ...sawParts],
+    offcuts: [
+      ...board.offcuts.map((o) => (o.id === offcutId ? { ...o, used: true } : o)),
+      ...withOffcutIds(offcutsOf(ctx, draft), prefix, lastK),
+    ],
+    cuts: [...board.cuts, ...cuts],
+  };
+}
+
+/** The Blanks, Saw Parts and cuts of a draft, inside `ctx.area`, in saw order. */
+function breakDown(
+  ctx: Ctx,
+  draft: DraftBoard,
+  naming: { prefix: string; letters: number; label: string; from?: string },
+): Pick<Board, 'blanks' | 'sawParts' | 'cuts'> {
+  const { area } = ctx;
+  const from = naming.from === undefined ? {} : { from: naming.from };
   const blanks: Blank[] = [];
   const sawParts: SawPlacement[] = [];
   const cuts: Cut[] = [];
 
   draft.strips.forEach((strip, i) => {
-    const rip = String(i + 1);
+    const rip = naming.label + String(i + 1);
     if (strip.y + strip.width < area.y1) {
-      cuts.push({ label: rip, kind: 'rip', x: area.x0, y: strip.y + strip.width, length: area.x1 - area.x0 });
+      cuts.push({ label: rip, kind: 'rip', x: area.x0, y: strip.y + strip.width, length: area.x1 - area.x0, ...from });
     }
     strip.pieces.forEach((piece, j) => {
       const end = piece.x + piece.length;
       if (end < area.x1) {
-        cuts.push({ label: rip + crossLetter(j), kind: 'cross', x: end, y: strip.y, length: strip.width });
+        cuts.push({ label: rip + crossLetter(j), kind: 'cross', x: end, y: strip.y, length: strip.width, ...from });
       }
       if (piece.kind === 'saw') {
         sawParts.push({
@@ -569,32 +774,24 @@ function finishBoard(ctx: Ctx, draft: DraftBoard, number: number): Board {
         });
         return;
       }
-      const letter = blankLetter(blanks.length);
+      const letter = blankLetter(naming.letters + blanks.length);
       const parts = [...piece.placed]
         .sort((a, b) => a.y - b.y || a.x - b.x)
         .map((p, k) => ({ n: k + 1, ...p }));
       blanks.push({
-        id: `${sheet.code}-${String(number)}-${letter}`,
+        id: `${naming.prefix}-${letter}`,
         letter,
         x: piece.x,
         y: strip.y,
         length: piece.length,
         width: strip.width,
+        ...from,
         clampMargin: ctx.settings.clampMargin,
         parts,
       });
     });
   });
-
-  return {
-    number,
-    length: sheet.length,
-    width: sheet.width,
-    blanks,
-    sawParts,
-    offcuts: offcutsOf(ctx, draft),
-    cuts,
-  };
+  return { blanks, sawParts, cuts };
 }
 
 interface Footprint {
