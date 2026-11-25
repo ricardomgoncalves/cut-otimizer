@@ -400,6 +400,7 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
       ...b.sawParts.filter(isLive).map((p) => p.partId),
     ]),
   );
+  const rules = new Map(parts.map((p) => [p.id, ruleFor(p, sheet, settings)]));
   const cnc: Part[] = [];
   const saw: SawItem[] = [];
   const sawReasons: Record<string, SawReason> = {};
@@ -411,7 +412,7 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
       sawReasons[part.id] = keptReason;
     }
     if (lockedIds.has(part.id)) continue;
-    const rule = ruleFor(part, sheet, settings);
+    const rule = rules.get(part.id) ?? ruleFor(part, sheet, settings);
     const choice = sawCnc[part.id];
     const autoReason: SawReason = rule.tileable ? 'long' : 'narrow';
     if (rule.oversize) saw.push({ part, reason: 'oversize' });
@@ -431,7 +432,6 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
     sawOrientations(p).some((o) => o.length <= area.x1 - area.x0 && o.width <= area.y1 - area.y0);
   const unplaced = saw.filter((s) => !fitsBoard(s.part)).map((s) => s.part.id);
 
-  const rules = new Map(parts.map((p) => [p.id, ruleFor(p, sheet, settings)]));
   const ctx: Ctx = {
     sheet,
     settings,
@@ -777,9 +777,9 @@ function tiledNest(
   width: number,
   cnc: Part[],
 ): { placed: Omit<Placement, 'n'>[]; left: Part[] } | null {
-  const long = cnc.filter((p) => ctx.tileable.has(p.id));
-  if (long.length === 0) return null;
-  const result = nest(ctx, length, width, [...long, ...cnc.filter((p) => !ctx.tileable.has(p.id))]);
+  const tileable = cnc.filter((p) => ctx.tileable.has(p.id));
+  if (tileable.length === 0) return null;
+  const result = nest(ctx, length, width, [...tileable, ...cnc.filter((p) => !ctx.tileable.has(p.id))]);
   if (!result.placed.some((p) => ctx.tileable.has(p.partId))) return null;
   // Keep the waiting order for what is left.
   const left = new Set(result.left.map((p) => p.id));

@@ -93,8 +93,8 @@ function allowedTurns(part: Part, settings: Settings): QuarterTurns[] {
     t % 2 === 0 ? { x: part.cutLength, y: part.cutWidth } : { x: part.cutWidth, y: part.cutLength };
   const inBed = TURN_ORDER.filter((t) => size(t).x <= settings.bedLength && size(t).y <= settings.bedWidth);
   if (inBed.length > 0) return inBed;
-  const tiled = TURN_ORDER.filter((t) => size(t).y <= settings.bedWidth);
-  return tiled.length > 0 ? tiled : TURN_ORDER;
+  const alongX = TURN_ORDER.filter((t) => size(t).y <= settings.bedWidth);
+  return alongX.length > 0 ? alongX : TURN_ORDER;
 }
 
 /** The orientation that puts the ops closest to the two fence edges (least total distance from both). */

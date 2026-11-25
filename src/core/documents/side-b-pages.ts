@@ -46,8 +46,9 @@ export function sideBPages(plan: Plan, job: CutSheetJob): Page[] {
 
 const drawingScale = (file: SideBFile) => Math.min(DRAWING_MAX_WIDTH / file.length, DRAWING_MAX_HEIGHT / file.width);
 
-/** A Flip Part longer than the bed, cut in Tiles (only with Allow tiling). */
-const tiled = (plan: Plan, file: SideBFile) => plan.settings.allowTiling && file.length > plan.settings.bedLength;
+/** A Flip Part longer than the bed but within its width, cut in Tiles along X (only with Allow tiling). */
+const tiled = (plan: Plan, file: SideBFile) =>
+  plan.settings.allowTiling && file.length > plan.settings.bedLength && file.width <= plan.settings.bedWidth;
 
 const drawingTop = (plan: Plan, file: SideBFile) => DRAWING_TOP + (tiled(plan, file) ? TILED_LINE : 0);
 

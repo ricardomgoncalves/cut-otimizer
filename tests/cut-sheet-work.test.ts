@@ -285,6 +285,12 @@ describe('cut sheet: Tiled Blanks', () => {
     expect(texts(sideB)).toContain('Tiled Part, 2000 mm long, longer than the bed (1300 mm): cut in Tiles');
   });
 
+  it('adds no Tiles note to the Side B card of a Flip Part too wide for the bed (an oversize Saw Part)', () => {
+    const wide: Model = { ...tiledModel, parts: tiledModel.parts.map((p) => ({ ...p, cutWidth: 1400000 })) };
+    const pages = cutSheet(plan(wide, DEFAULT_SETTINGS), { ...job, model: wide });
+    expect(pages.flatMap(texts).some((t) => t.includes('Tiles'))).toBe(false);
+  });
+
   it('adds no note when tiling is off', () => {
     const pages = cutSheet(plan(tiledModel, { ...DEFAULT_SETTINGS, allowTiling: false }), tiledJob);
     expect(pages.flatMap(texts).some((t) => t.includes('Tiles'))).toBe(false);

@@ -72,7 +72,9 @@ export function PartList({ job, sheet, progress, where, needsNesting, overflow, 
                   ) : (
                     <>
                       {at}
-                      {reason && sheet.sawParts.includes(p.id) && ` (${SAW_REASONS[reason]})`}
+                      {reason &&
+                        sheet.sawParts.includes(p.id) &&
+                        ` (${SAW_REASONS[reason]}${reason === 'oversize' && job.plan.settings.allowTiling ? ': tiling only goes along X' : ''})`}
                     </>
                   )}
                   {placed && isCut(progress, p.id) && (
