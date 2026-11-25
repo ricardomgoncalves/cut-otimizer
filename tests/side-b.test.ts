@@ -150,3 +150,26 @@ describe('Side B files', () => {
     }
   });
 });
+
+describe('Long Flip Parts (Tiled)', () => {
+  // A cup near the front-left corner would turn the bottom view a quarter turn, putting 2000 mm along Y.
+  const long = () => modelOf([{ ...door('d1', [cup(100, 22.5)], { length: 2000, width: 600 }), top: [cup(100, 22.5)] }]);
+
+  it('keeps a Flip Part longer than the bed long along X (tiling only goes along X), one file for the whole Part', () => {
+    const [file] = plan(long(), DEFAULT_SETTINGS).sideB;
+
+    expect(file).toMatchObject({ id: 'B1', turns: 0, length: mm(2000), width: mm(600), longFence: 'yW', shortFence: 'x0' });
+  });
+
+  it('turns it as before when tiling is off', () => {
+    const [file] = plan(long(), { ...DEFAULT_SETTINGS, allowTiling: false }).sideB;
+
+    expect(file).toMatchObject({ turns: 1, length: mm(600), width: mm(2000) });
+  });
+
+  it('still turns a Part that fits the bed either way to put its ops nearest the fences', () => {
+    const [file] = plan(modelOf([door('d1', [cup(100, 22.5)], { length: 1000, width: 600 })]), DEFAULT_SETTINGS).sideB;
+
+    expect(file?.turns).toBe(1);
+  });
+});

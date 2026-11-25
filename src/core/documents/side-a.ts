@@ -20,6 +20,7 @@ import {
   plural,
   sectionNumber,
   stepColumns,
+  tiledNote,
   workHeader,
   type CutSheetJob,
 } from './work.ts';
@@ -102,6 +103,10 @@ function blankPages(plan: Plan, job: CutSheetJob, sheet: SheetPlan, blank: Blank
   const of = (pl: Placement): PartPrint =>
     print.parts[String(pl.n)] ?? { name: pl.partId, cutLength: pl.cutLength, cutWidth: pl.cutWidth, bands: [], grainLength: false, manualOps: [], steps: [] };
 
+  if (blank.tiled) {
+    flow.paragraph(tiledNote('Blank', blank.length, plan.settings.bedLength), { size: FONT.small, bold: true });
+    flow.y += 1;
+  }
   flow.y += 2;
   flow.add(...blankDrawing(plan, blank, of, flow.y));
   flow.y += drawingHeight(blank) + 9;

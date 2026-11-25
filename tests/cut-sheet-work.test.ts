@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { cutSheet, type CutSheetJob, type Page } from '../src/core/documents/index.ts';
 import { importExport } from '../src/core/import/index.ts';
 import { plan, type Plan } from '../src/core/planner/index.ts';
+import type { CncOp, Model } from '../src/core/model.ts';
 import { DEFAULT_SETTINGS } from '../src/core/settings.ts';
 import { handModel, handPlan } from './cut-sheet-plan.ts';
 import { pageText, texts } from './page-text.ts';
@@ -238,5 +239,60 @@ describe('cut sheet goldens (hand-written Plan)', () => {
     ['owners', '6 · Owner summary'],
   ])('%s', async (name, title) => {
     await expect(pageText(titled(pages, title)[0] as Page)).toMatchFileSnapshot(`golden/cut-sheet-${name}.txt`);
+  });
+});
+
+describe('cut sheet: Tiled Blanks', () => {
+  const cup = (x: number, y: number): CncOp => ({ kind: 'drill', at: { x, y }, diameter: 35000, depth: 13000 });
+  const tiledModel: Model = {
+    projectName: 'Hall',
+    edgebands: [],
+    sheets: [{ id: 's1', name: 'White 18', code: 'W18', thickness: 18000, length: 2800000, width: 2070000, grain: 'none' }],
+    owners: [{ kind: 'cabinet', id: 'c1', label: 'T1' }],
+    parts: [
+      {
+        id: 'door',
+        name: 's0.door.leaf[0]',
+        partName: 'Door',
+        displayName: 'T1 · Door',
+        ownerId: 'c1',
+        sheetId: 's1',
+        thickness: 18000,
+        cutLength: 2000000,
+        cutWidth: 600000,
+        grain: 'length',
+        top: [],
+        bottom: [cup(100000, 22500), cup(1900000, 22500)],
+        manualOps: [],
+        edges: {},
+      },
+    ],
+  };
+  const tiledJob: CutSheetJob = { ...job, model: tiledModel };
+
+  it('draws the whole Tiled Blank and notes it is cut in Tiles; a tiled Flip Part gets the note on Side B', () => {
+    const tiledPlan = plan(tiledModel, DEFAULT_SETTINGS);
+    const blank = tiledPlan.sheets[0]?.boards[0]?.blanks[0];
+    expect(blank?.tiled).toBe(true);
+    const pages = cutSheet(tiledPlan, tiledJob);
+
+    const sideA = titled(pages, '2 · CNC Side A')[0];
+    expect(texts(sideA)).toContain('Tiled Blank, 2080 mm long, longer than the bed (1300 mm): cut in Tiles');
+    // Scaled to fit: the Blank outline spans the drawing width, not past the page.
+    const outline = sideA?.items.find((it) => it.kind === 'box' && it.lineWidth === 0.4);
+    expect(outline?.kind === 'box' && outline.x >= 0 && outline.x + outline.width <= 210).toBe(true);
+    const sideB = titled(pages, '3 · CNC Side B batch')[0];
+    expect(texts(sideB)).toContain('Tiled Part, 2000 mm long, longer than the bed (1300 mm): cut in Tiles');
+  });
+
+  it('adds no Tiles note to the Side B card of a Flip Part too wide for the bed (an oversize Saw Part)', () => {
+    const wide: Model = { ...tiledModel, parts: tiledModel.parts.map((p) => ({ ...p, cutWidth: 1400000 })) };
+    const pages = cutSheet(plan(wide, DEFAULT_SETTINGS), { ...job, model: wide });
+    expect(pages.flatMap(texts).some((t) => t.includes('Tiles'))).toBe(false);
+  });
+
+  it('adds no note when tiling is off', () => {
+    const pages = cutSheet(plan(tiledModel, { ...DEFAULT_SETTINGS, allowTiling: false }), tiledJob);
+    expect(pages.flatMap(texts).some((t) => t.includes('Tiles'))).toBe(false);
   });
 });

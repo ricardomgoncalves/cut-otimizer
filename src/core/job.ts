@@ -175,7 +175,10 @@ export function setPartMode(
 ): { job: Job } | { error: string } {
   const rule = partRule(job.model, job.settings, partId);
   if (!rule) return { error: `There is no Part ${partId} in this Job.` };
-  if (rule.oversize) return { error: 'This Part is bigger than the usable bed, so it is always cut on the saw.' };
+  if (rule.oversize) {
+    const tiling = job.settings.allowTiling ? ' Tiling only goes along X: it must fit the bed’s width.' : '';
+    return { error: `This Part is bigger than the usable bed, so it is always cut on the saw.${tiling}` };
+  }
   const cut = (id: string) => isCut(progress, id);
   for (const { id, board } of lockedBoards(job, progress)) {
     if (board.sawParts.some((p) => isLive(p) && p.partId === partId)) {

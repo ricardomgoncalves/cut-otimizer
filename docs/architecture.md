@@ -796,3 +796,47 @@ Interfaces vs the PRD "Modules" table (kept on purpose):
   (old model, old progress, before renames) and by job.ts planJob on the prior Plan (regenerate/addBoards). Planner keeps
   Locked Blanks verbatim (so the snapshot); `relayBlank` drops it. Older Plans / unlocked Blanks: no `sideA`, rendered
   from the model as before (goldens unchanged). Not frozen: the Job header (name, short id, generatedAt).
+
+## Tiled Blanks (ticket #45; ADR 0001)
+A Part longer than the bed (a 600 × 2000 door on the 1300 × 1300 bed) can go on the CNC: CAM cuts its Blank in
+several Tiles from one file. Tiling goes along X only, and the app never models where the Tiles fall.
+```
+src/core/settings.ts       Settings.allowTiling: boolean. DEFAULT_SETTINGS true; parseSettings reads a missing or
+                           malformed value as FALSE (every stored copy: Job snapshots and the browser's settings), so
+                           older Jobs plan as before. An empty browser store still gets DEFAULT_SETTINGS (true).
+src/core/planner/index.ts  PartRule.tileable. SawReason gained 'long'. Blank.tiled?: true. Ctx.tileable (Part ids).
+                           tiledNest(ctx, length, width, cnc): the tileable Parts first, then the rest, on a Blank as long
+                           as the rest of the strip; null when none is waiting or none fits (then the usual bed-sized nest).
+src/core/planner/side-b.ts allowedTurns(part, settings): with tiling, a Flip Part keeps to turns that fit the bed, else to
+                           turns that fit the bed WIDTH (long along X), else any. Without tiling, any turn (as before).
+src/core/job.ts            setPartMode: the oversize error adds "Tiling only goes along X: it must fit the bed's width."
+                           when the Job's snapshot has tiling on (unchanged text when off).
+src/core/documents/work.ts tiledNote('Blank' | 'Part', length, bedLength) -> "Tiled Blank, 2080 mm long, longer than the
+                           bed (1300 mm): cut in Tiles". side-a.ts: bold header note on a `blank.tiled` page (the drawing
+                           already scales to the Blank's length). side-b-pages.ts: a card line when allowTiling and
+                           file.length > bedLength (card's drawing moves down TILED_LINE).
+src/shell/                 SettingsScreen checkbox "Allow tiling: …", SETTING_LABELS.allowTiling; PartList reason text
+                           'long' -> "longer than the bed", oversize title mentions X; SheetSection figcaption span.tiled.
+fixtures/long-door.parts.json  synthetic fixture with a 2000 × 600 door (two blind hinge cups: a tiled Flip Part).
+tests/                     planner "Tiled Blanks" (rule, nesting, toggle, Offcut, random invariants with ops), side-b,
+                           job, cut-sheet-work, settings; goldens tests/golden/W18-1-A.tiled.side-a.dxf and
+                           J7-B1.tiled.side-b.dxf (hand Plans in tests/dxf.test.ts). e2e/tiling.spec.ts.
+```
+**Plan shape**: `Blank.tiled?: true` (optional: older and hand-written Plans are fine) on a Blank longer than
+`settings.bedLength`. `SheetPlan.sawReasons` may hold `'long'`. Nothing about Tiles goes in any file or the Plan.
+
+**Rules** (only with `allowTiling`; off, everything is exactly as before):
+- usable bed = min(bed, trimmed Board) − 2 × clamp per side. A Part that fits it in an orientation its grain allows is a
+  plain Part. Else it is **tileable** when some allowed orientation fits the usable bed width and is no longer than the
+  trimmed Board length − 2 × clamp; else **oversize** (always saw, no toggle).
+- Tileable: auto CNC with CNC ops, else auto Saw with reason `'long'`; the toggle works both ways (a hand-chosen saw is
+  `'chosen'`). Narrow + tileable + no ops -> `'long'`.
+- Breakdown: in `fillStrip`, each Blank first tries `tiledNest` (length = rest of the strip, ignoring the length cap);
+  the Blank shrinks to used extent + clamp like any other, and is `tiled` when it ends up longer than the bed. Width
+  stays <= bedWidth (strip widths are capped as before). So a Blank goes past the bed only when it holds a tileable
+  Part. Kept Offcuts (needs-nesting) use the same strip code, so the same rule; relayBlank keeps an outline as it was.
+- Invariants test: a non-tiled Blank stays within the bed; a tiled one is <= bedWidth, > bedLength, and holds a Part
+  longer than the usable bed. Clamp margin on the Blank's outer edges only (no clear strips at Tile edges).
+- Older tests that check pre-tiling behaviour (oversize leftSide, its toggle error) use `{...DEFAULT_SETTINGS,
+  allowTiling: false}`; the synthetic fixture's 2100 mm op-less side is now `'long'` by default (still a Saw Part, so
+  every golden and e2e is unchanged).

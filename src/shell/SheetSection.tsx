@@ -94,6 +94,7 @@ export function SheetSection({ job, sheet, progress, rolled, nameOf, sideBOf, wh
                   {roll?.total ?? blank.parts.length} Done
                 </span>
                 {roll?.locked && <span className="locked"> · Locked</span>}
+                {blank.tiled && <span className="tiled"> · Tiled Blank: longer than the bed, CAM cuts it in Tiles</span>}
               </figcaption>
               <BlankLayout
                 blank={blank}

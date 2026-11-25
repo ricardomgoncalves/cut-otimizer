@@ -11,6 +11,13 @@
 //   width on its shorter cut side with no CNC ops becomes one automatically ('narrow'). The Job's per-Part
 //   Saw / CNC toggle (`prior.sawCnc`) overrides that, both ways, except for 'oversize' Parts. A narrow Part
 //   left on the CNC is nested like any other and flagged `narrow` (a warning, not a different rule).
+// - Tiled Blanks (#45; ADR 0001), only with `settings.allowTiling`: a Part that fits the usable bed width
+//   but is longer than the usable bed along X (and no longer than the trimmed Board minus the clamp
+//   margins) is tileable, not oversize. It defaults to the CNC when it has CNC ops, else to the saw
+//   ('long'), and the toggle works for it. On the CNC it goes on a Tiled Blank: longer than the bed along X
+//   (never wider), with other Parts nested anywhere on it inside the clamp margin of its outer edges. CAM
+//   decides where the Tiles fall, so nothing is kept clear at their edges. Every other Blank stays within
+//   the bed.
 // - Breakdown, one Board at a time: two-stage guillotine. Rip strips from the front edge (after edge trim),
 //   then crosscut each strip from the left into pieces, with saw kerf between pieces. A piece is a Blank
 //   (no larger than the bed, Parts nested with maxrects BSSF inside the clamp margin, the bit diameter
@@ -93,6 +100,11 @@ export interface Blank {
   /** In `#n` order. */
   parts: Placement[];
   /**
+   * A Tiled Blank: longer than the bed along X (never wider), to hold a Part longer than the usable bed.
+   * CAM cuts it in Tiles from its one Side A file. Unset on every Blank within the bed.
+   */
+  tiled?: true;
+  /**
    * What the Blank's Side A page shows, frozen while the Blank is Locked (PRD 11.8: its PDF page isn't
    * rewritten). Taken just before a re-import or a regenerate could change the Parts, Side B files or
    * Manual ops under it, and kept with the Locked Blank from then on. Unset (every Blank of an older stored
@@ -127,8 +139,11 @@ export interface PartPrint {
   steps: Step[];
 }
 
-/** Why a Part is cut on the saw. */
-export type SawReason = 'oversize' | 'narrow' | 'chosen';
+/**
+ * Why a Part is cut on the saw: bigger than the usable bed (even with tiling), narrow with no CNC ops,
+ * longer than the bed with no CNC ops (tileable, so the toggle can send it to a Tiled Blank), or chosen.
+ */
+export type SawReason = 'oversize' | 'narrow' | 'long' | 'chosen';
 
 /** A Saw Part's piece in a Board's Breakdown. */
 export interface SawPlacement {
@@ -250,8 +265,10 @@ export interface PlanPrior {
 /** How a Part is cut without any toggle, and whether the toggle applies. */
 export interface PartRule {
   auto: PartMode;
-  /** Bigger than the usable bed: always a Saw Part, no toggle. */
+  /** Bigger than the usable bed (with tiling, too wide or too long for a Tiled Blank): always a Saw Part, no toggle. */
   oversize: boolean;
+  /** Longer than the usable bed but fits a Tiled Blank (only with Allow tiling): on the CNC when it has CNC ops. */
+  tileable: boolean;
   /** Shorter cut side under Min CNC width. */
   narrow: boolean;
   /** Has ops the CNC runs (top, or bottom kinds not set to manual). */
@@ -307,18 +324,24 @@ export function partRule(model: Model, settings: Settings, partId: string): Part
 }
 
 function ruleFor(part: Part, sheet: Sheet, settings: Settings): PartRule {
-  const { length, width } = largestPiece(trimmedArea(sheet, settings), settings);
-  const usableL = length - 2 * settings.clampMargin;
-  const usableW = width - 2 * settings.clampMargin;
-  const fits = (l: number, w: number) => l <= usableL && w <= usableW;
-  const oversize = !(
-    fits(part.cutLength, part.cutWidth) ||
-    (part.grain === 'none' && fits(part.cutWidth, part.cutLength))
-  );
+  const area = trimmedArea(sheet, settings);
+  const { length, width } = largestPiece(area, settings);
+  const clamps = 2 * settings.clampMargin;
+  const usableL = length - clamps;
+  const usableW = width - clamps;
+  const orientations = footprints(part);
+  const fitsBed = orientations.some((o) => o.length <= usableL && o.width <= usableW);
+  // Tiling goes along X only: within the bed's width, up to the trimmed Board's length.
+  const tileable =
+    settings.allowTiling &&
+    !fitsBed &&
+    orientations.some((o) => o.width <= usableW && o.length <= area.x1 - area.x0 - clamps);
+  const oversize = !fitsBed && !tileable;
   const narrow = Math.min(part.cutLength, part.cutWidth) < settings.minCncWidth;
   const hasCncOps =
     part.top.length > 0 || part.bottom.some((op) => !settings.manualBottomOpKinds.includes(op.kind));
-  return { auto: oversize || (narrow && !hasCncOps) ? 'saw' : 'cnc', oversize, narrow, hasCncOps };
+  const auto = oversize || ((tileable || narrow) && !hasCncOps) ? 'saw' : 'cnc';
+  return { auto, oversize, tileable, narrow, hasCncOps };
 }
 
 /** Sheets grouped by thickness, groups in order of first appearance, Sheets in export order. */
@@ -377,6 +400,7 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
       ...b.sawParts.filter(isLive).map((p) => p.partId),
     ]),
   );
+  const rules = new Map(parts.map((p) => [p.id, ruleFor(p, sheet, settings)]));
   const cnc: Part[] = [];
   const saw: SawItem[] = [];
   const sawReasons: Record<string, SawReason> = {};
@@ -388,12 +412,13 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
       sawReasons[part.id] = keptReason;
     }
     if (lockedIds.has(part.id)) continue;
-    const rule = ruleFor(part, sheet, settings);
+    const rule = rules.get(part.id) ?? ruleFor(part, sheet, settings);
     const choice = sawCnc[part.id];
+    const autoReason: SawReason = rule.tileable ? 'long' : 'narrow';
     if (rule.oversize) saw.push({ part, reason: 'oversize' });
     else if (choice === 'cnc') cnc.push(part);
-    else if (choice === 'saw') saw.push({ part, reason: rule.auto === 'saw' ? 'narrow' : 'chosen' });
-    else if (rule.auto === 'saw') saw.push({ part, reason: 'narrow' });
+    else if (choice === 'saw') saw.push({ part, reason: rule.auto === 'saw' ? autoReason : 'chosen' });
+    else if (rule.auto === 'saw') saw.push({ part, reason: autoReason });
     else cnc.push(part);
     const item = saw[saw.length - 1];
     if (item?.part === part) {
@@ -411,7 +436,8 @@ function planSheet(sheet: Sheet, parts: Part[], settings: Settings, prior: Sheet
     sheet,
     settings,
     area,
-    narrow: new Set(parts.filter((p) => ruleFor(p, sheet, settings).narrow).map((p) => p.id)),
+    narrow: new Set(parts.filter((p) => rules.get(p.id)?.narrow).map((p) => p.id)),
+    tileable: new Set(parts.filter((p) => rules.get(p.id)?.tileable).map((p) => p.id)),
   };
   // Parts on no Board of the prior Plan need nesting: Remakes, Parts added since…
   const needs = new Set(prior.live ? parts.filter((p) => !prior.live?.has(p.id)).map((p) => p.id) : []);
@@ -572,6 +598,8 @@ interface Ctx {
   settings: Settings;
   area: Area;
   narrow: Set<string>;
+  /** Parts longer than the usable bed that fit a Tiled Blank (only with Allow tiling). */
+  tileable: Set<string>;
 }
 
 type DraftPiece =
@@ -721,7 +749,7 @@ function fillStrip(
   if (width <= settings.bedWidth && width > 2 * clamp) {
     while (cnc.length > 0 && area.x1 - x > 2 * clamp) {
       const length = Math.min(lCap, settings.bedLength, area.x1 - x);
-      const { placed, left } = nest(ctx, length, width, cnc);
+      const { placed, left } = tiledNest(ctx, area.x1 - x, width, cnc) ?? nest(ctx, length, width, cnc);
       if (placed.length === 0) break;
       const usedLength = Math.max(...placed.map((p) => p.x + (p.rotated ? p.cutWidth : p.cutLength))) + clamp;
       const blankWidth = Math.max(...placed.map((p) => p.y + (p.rotated ? p.cutLength : p.cutWidth))) + clamp;
@@ -736,6 +764,26 @@ function fillStrip(
 
   const hasSaw = pieces.some((p) => p.kind === 'saw');
   return { y, width: hasSaw ? width : usedWidth, pieces, area: placedArea, blanks };
+}
+
+/**
+ * A Tiled Blank's Layout: the tileable Parts first, then the rest, nested on a Blank as long as what is
+ * left of the strip. Null when no tileable Part is waiting or none fits there, so the Blank stays within
+ * the bed. The Blank then shrinks to what its Layout uses, like any other.
+ */
+function tiledNest(
+  ctx: Ctx,
+  length: number,
+  width: number,
+  cnc: Part[],
+): { placed: Omit<Placement, 'n'>[]; left: Part[] } | null {
+  const tileable = cnc.filter((p) => ctx.tileable.has(p.id));
+  if (tileable.length === 0) return null;
+  const result = nest(ctx, length, width, [...tileable, ...cnc.filter((p) => !ctx.tileable.has(p.id))]);
+  if (!result.placed.some((p) => ctx.tileable.has(p.partId))) return null;
+  // Keep the waiting order for what is left.
+  const left = new Set(result.left.map((p) => p.id));
+  return { placed: result.placed, left: cnc.filter((p) => left.has(p.id)) };
 }
 
 /** The Offcuts of a draft: each strip's right-hand rest, then the rest of the Board behind the last strip. */
@@ -858,6 +906,7 @@ function breakDown(
         ...from,
         clampMargin: ctx.settings.clampMargin,
         parts,
+        ...(piece.length > ctx.settings.bedLength ? { tiled: true as const } : {}),
       });
     });
   });

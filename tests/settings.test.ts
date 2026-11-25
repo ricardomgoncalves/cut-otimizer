@@ -21,6 +21,7 @@ describe('DEFAULT_SETTINGS', () => {
       minOffcutSize: 150000,
       manualBottomOpKinds: [],
       fenceHeightNote: '',
+      allowTiling: true,
     });
   });
 });
@@ -57,12 +58,22 @@ describe('parseSettings', () => {
       clampMargin: 25000,
       edgeTrimBySheet: { a: 2000 },
       manualBottomOpKinds: ['drill'],
+      allowTiling: false,
     });
   });
 
-  it('gives the defaults for anything that is not an object', () => {
-    expect(parseSettings(null)).toEqual(DEFAULT_SETTINGS);
-    expect(parseSettings('{')).toEqual(DEFAULT_SETTINGS);
+  it('gives the defaults for anything that is not an object, with tiling off', () => {
+    expect(parseSettings(null)).toEqual({ ...DEFAULT_SETTINGS, allowTiling: false });
+    expect(parseSettings('{')).toEqual({ ...DEFAULT_SETTINGS, allowTiling: false });
+  });
+
+  it('reads a missing or malformed Allow tiling as off, so stored Jobs from before it plan as they did', () => {
+    const older: Partial<typeof DEFAULT_SETTINGS> = { ...DEFAULT_SETTINGS };
+    delete older.allowTiling;
+    expect(parseSettings(older).allowTiling).toBe(false);
+    expect(parseSettings({ ...older, allowTiling: 'yes' }).allowTiling).toBe(false);
+    expect(parseSettings({ ...older, allowTiling: true }).allowTiling).toBe(true);
+    expect(parseSettings({ ...older, allowTiling: false }).allowTiling).toBe(false);
   });
 });
 
@@ -110,7 +121,8 @@ describe('settingsChanges', () => {
         clampMargin: 30000,
         edgeTrimBySheet: { a: 1000 },
         fenceHeightNote: 'x',
+        allowTiling: false,
       }),
-    ).toEqual(['clampMargin', 'edgeTrimBySheet', 'fenceHeightNote']);
+    ).toEqual(['clampMargin', 'edgeTrimBySheet', 'fenceHeightNote', 'allowTiling']);
   });
 });

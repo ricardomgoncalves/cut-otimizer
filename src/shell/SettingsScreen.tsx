@@ -29,6 +29,7 @@ interface Draft {
   trimBySheet: Record<string, string>;
   manualBottomOpKinds: OpKind[];
   fenceHeightNote: string;
+  allowTiling: boolean;
 }
 
 
@@ -38,6 +39,7 @@ function toDraft(s: Settings): Draft {
     trimBySheet: Object.fromEntries(Object.entries(s.edgeTrimBySheet).map(([id, um]) => [id, mmExact(um)])),
     manualBottomOpKinds: s.manualBottomOpKinds,
     fenceHeightNote: s.fenceHeightNote,
+    allowTiling: s.allowTiling,
   };
 }
 
@@ -64,6 +66,7 @@ function fromDraft(d: Draft): { settings: Settings; errors: string[] } {
   }
   settings.manualBottomOpKinds = OP_KINDS.filter((k) => d.manualBottomOpKinds.includes(k));
   settings.fenceHeightNote = d.fenceHeightNote;
+  settings.allowTiling = d.allowTiling;
   if (errors.length === 0) errors.push(...validateSettings(settings).map((e: SettingsError) => e.message));
   return { settings, errors };
 }
@@ -133,6 +136,18 @@ export function SettingsScreen({ settings, sheets, onSave }: Props) {
             </label>
           </p>
         ))}
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={draft.allowTiling}
+              onChange={(e) => {
+                edit({ allowTiling: e.target.checked });
+              }}
+            />{' '}
+            {SETTING_LABELS.allowTiling}: CAM may cut a Blank longer than the bed in Tiles, along X only
+          </label>
+        </p>
       </fieldset>
 
       {trimSheetIds.length > 0 && (

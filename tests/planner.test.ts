@@ -12,6 +12,9 @@ import {
 } from '../src/core/planner/index.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/core/settings.ts';
 
+/** The settings from before tiling: a Part longer than the bed is always a Saw Part. */
+const NO_TILING: Settings = { ...DEFAULT_SETTINGS, allowTiling: false };
+
 function syntheticModel(): Model {
   const json: unknown = JSON.parse(
     readFileSync(new URL('../fixtures/synthetic.parts.json', import.meta.url), 'utf8'),
@@ -88,10 +91,18 @@ function expectInvariants(
       // Blank on a Locked Board keeps its outline but is nested again with the new settings.
       const settings = locked?.boards.has(`${sheet.sheetId}/${String(board.number)}`) ? locked.settings : planSettings;
       const trim = settings.edgeTrimBySheet[sheet.sheetId] ?? settings.edgeTrim;
-      // Blanks within the bed; every saw piece within the trimmed Board, with kerf between saw pieces.
+      // Blanks within the bed, except a Tiled Blank: longer than the bed along X only, to hold a Part
+      // longer than the usable bed. Every saw piece within the trimmed Board, with kerf between saw pieces.
       for (const blank of board.blanks) {
-        expect(blank.length).toBeLessThanOrEqual(settings.bedLength);
-        expect(blank.width).toBeLessThanOrEqual(settings.bedWidth);
+        expect(blank.width, blank.id).toBeLessThanOrEqual(settings.bedWidth);
+        if (!blank.tiled) {
+          expect(blank.length, blank.id).toBeLessThanOrEqual(settings.bedLength);
+          continue;
+        }
+        expect(settings.allowTiling, blank.id).toBe(true);
+        expect(blank.length, blank.id).toBeGreaterThan(settings.bedLength);
+        const usableL = settings.bedLength - 2 * (blank.clampMargin ?? settings.clampMargin);
+        expect(footprints(blank).some((r) => r.length > usableL), `${blank.id} holds a Part longer than the bed`).toBe(true);
       }
       const pieces: (Rect & { name: string })[] = [
         ...board.blanks.map((b) => ({ ...b, name: b.id })),
@@ -209,13 +220,18 @@ describe('plan', () => {
   });
 
   it('makes the 2100 mm side and the narrow op-less rail Saw Parts, and nests the rest', () => {
-    const result = plan(syntheticModel(), DEFAULT_SETTINGS);
+    const result = plan(syntheticModel(), NO_TILING);
 
     expect(result.sheets.map((s) => [s.code, s.sawParts])).toEqual([
       ['W18', ['c1/leftSide', 'c1/s0.rail[1]']],
       ['O16', []],
     ]);
     expect(result.sheets[0]?.sawReasons).toEqual({ 'c1/leftSide': 'oversize', 'c1/s0.rail[1]': 'narrow' });
+  });
+
+  it('makes the op-less 2100 mm side a Saw Part longer than the bed when tiling is on', () => {
+    const result = plan(syntheticModel(), DEFAULT_SETTINGS);
+    expect(result.sheets[0]?.sawReasons).toEqual({ 'c1/leftSide': 'long', 'c1/s0.rail[1]': 'narrow' });
   });
 
   it('gives Blank ids <Sheet code>-<Board>-<letter> and numbers Parts #1..n', () => {
@@ -325,11 +341,11 @@ describe('plan', () => {
 
   it('makes any Part a Saw Part by hand, but never sends a Part bigger than the bed to the CNC', () => {
     const model = syntheticModel();
-    const result = plan(model, DEFAULT_SETTINGS, {
+    const result = plan(model, NO_TILING, {
       sawCnc: { 'c1/s0.shelf[0]': 'saw', 'c1/leftSide': 'cnc' },
     });
 
-    expectInvariants(model, result, DEFAULT_SETTINGS);
+    expectInvariants(model, result, NO_TILING);
     expect(result.sheets[0]?.sawReasons).toEqual({
       'c1/leftSide': 'oversize',
       'c1/s0.shelf[0]': 'chosen',
@@ -355,6 +371,7 @@ describe('plan', () => {
     expect(partRule(model, DEFAULT_SETTINGS, 'c1/s0.rail[1]')).toEqual({
       auto: 'cnc',
       oversize: false,
+      tileable: false,
       narrow: true,
       hasCncOps: true,
     });
@@ -769,6 +786,165 @@ describe('Remake, kept Offcuts and the needs-nesting order', () => {
         expect(kept?.cuts.slice(0, old.cuts.length)).toEqual(old.cuts);
       }
     }
+  });
+});
+
+describe('Tiled Blanks', () => {  const cup = (x: number) => ({ kind: 'drill' as const, at: { x, y: 22000 }, diameter: 35000, depth: 13000 });
+  const drill = { kind: 'drill' as const, at: { x: 32000, y: 32000 }, diameter: 5000, depth: 10000 };
+
+  /** One 2800 × 2070 Sheet with a door and some shelves, all with CNC ops unless told otherwise. */
+  function doorModel(door: Partial<Part> = {}, shelves = 6): Model {
+    const model = randomModel(1, 1);
+    const base = model.parts[0] as Part;
+    model.sheets = model.sheets.slice(0, 1);
+    model.parts = [
+      { ...base, id: 'door', cutLength: 2000000, cutWidth: 600000, grain: 'length', top: [cup(100000), cup(1900000)], ...door },
+      ...Array.from({ length: shelves }, (_, i) => ({
+        ...base,
+        id: `shelf${String(i)}`,
+        cutLength: 560000,
+        cutWidth: 400000,
+        grain: 'length' as const,
+        top: [drill],
+      })),
+    ];
+    return model;
+  }
+
+  describe('partRule', () => {
+    it('makes a Part longer than the usable bed but within its width tileable, on the CNC when it has CNC ops', () => {
+      expect(partRule(doorModel(), DEFAULT_SETTINGS, 'door')).toEqual({
+        auto: 'cnc',
+        oversize: false,
+        tileable: true,
+        narrow: false,
+        hasCncOps: true,
+      });
+    });
+
+    it('cuts a tileable Part with no CNC ops on the saw by default', () => {
+      expect(partRule(doorModel({ top: [] }), DEFAULT_SETTINGS, 'door')).toMatchObject({
+        auto: 'saw',
+        oversize: false,
+        tileable: true,
+      });
+    });
+
+    it('turns a grain-free Part so it is long along X when only that way fits the bed width', () => {
+      expect(partRule(doorModel({ cutLength: 600000, cutWidth: 2000000, grain: 'none' }), DEFAULT_SETTINGS, 'door')).toMatchObject({
+        oversize: false,
+        tileable: true,
+      });
+      // Grained the wrong way: 2000 mm across the bed is too wide, and tiling only goes along X.
+      expect(partRule(doorModel({ cutLength: 600000, cutWidth: 2000000, grain: 'length' }), DEFAULT_SETTINGS, 'door')).toMatchObject({
+        oversize: true,
+        tileable: false,
+      });
+    });
+
+    it('keeps a Part too wide for the bed, or longer than the trimmed Board minus the clamp margins, oversize', () => {
+      expect(partRule(doorModel({ cutWidth: 1400000 }), DEFAULT_SETTINGS, 'door')).toMatchObject({ auto: 'saw', oversize: true, tileable: false });
+      // 2800 Board - 2 × 40 clamp = 2720.
+      expect(partRule(doorModel({ cutLength: 2721000 }), DEFAULT_SETTINGS, 'door')).toMatchObject({ oversize: true, tileable: false });
+      expect(partRule(doorModel({ cutLength: 2720000 }), DEFAULT_SETTINGS, 'door')).toMatchObject({ oversize: false, tileable: true });
+      expect(
+        partRule(doorModel({ cutLength: 2720000 }), { ...DEFAULT_SETTINGS, edgeTrim: 5000 }, 'door'),
+      ).toMatchObject({ oversize: true });
+    });
+
+    it('is the rule from before tiling when Allow tiling is off', () => {
+      expect(partRule(doorModel(), NO_TILING, 'door')).toEqual({
+        auto: 'saw',
+        oversize: true,
+        tileable: false,
+        narrow: false,
+        hasCncOps: true,
+      });
+    });
+  });
+
+  it('puts a long door with CNC ops on one Tiled Blank, at most the bed wide, with other Parts beside it', () => {
+    const model = doorModel();
+    const result = plan(model, DEFAULT_SETTINGS);
+
+    expectInvariants(model, result, DEFAULT_SETTINGS);
+    expectRunOrder(model, result);
+    expect(result.sheets[0]?.sawParts).toEqual([]);
+    const tiled = allBlanks(result).filter((b) => b.tiled);
+    expect(tiled).toHaveLength(1);
+    const blank = tiled[0] as Blank;
+    expect(blank.length).toBeGreaterThanOrEqual(2000000 + 2 * 40000);
+    expect(blank.width).toBeLessThanOrEqual(1300000);
+    expect(blank.parts.map((p) => p.partId)).toContain('door');
+    // The rest of its width is filled with shelves.
+    expect(blank.parts.length).toBeGreaterThan(1);
+    // No other Blank is tiled or longer than the bed.
+    for (const b of allBlanks(result).filter((x) => x !== blank)) expect(b.length).toBeLessThanOrEqual(1300000);
+  });
+
+  it('makes a tileable Part with no CNC ops a Saw Part (longer than the bed), which the toggle sends to the CNC', () => {
+    const model = doorModel({ top: [] });
+    const sawn = plan(model, DEFAULT_SETTINGS);
+    expect(sawn.sheets[0]?.sawReasons).toEqual({ door: 'long' });
+    expect(allBlanks(sawn).some((b) => b.tiled)).toBe(false);
+
+    const toggled = plan(model, DEFAULT_SETTINGS, { sawCnc: { door: 'cnc' } });
+    expectInvariants(model, toggled, DEFAULT_SETTINGS);
+    expect(toggled.sheets[0]?.sawParts).toEqual([]);
+    expect(allBlanks(toggled).find((b) => b.parts.some((p) => p.partId === 'door'))?.tiled).toBe(true);
+  });
+
+  it('sends a tileable Part with CNC ops to the saw by hand', () => {
+    const result = plan(doorModel(), DEFAULT_SETTINGS, { sawCnc: { door: 'saw' } });
+    expect(result.sheets[0]?.sawReasons).toEqual({ door: 'chosen' });
+    expect(allBlanks(result).some((b) => b.tiled)).toBe(false);
+  });
+
+  it('keeps a Part too wide for the bed a Saw Part, whatever the toggle', () => {
+    const result = plan(doorModel({ cutWidth: 1400000 }), DEFAULT_SETTINGS, { sawCnc: { door: 'cnc' } });
+    expect(result.sheets[0]?.sawReasons).toEqual({ door: 'oversize' });
+    expect(allBlanks(result).some((b) => b.tiled)).toBe(false);
+  });
+
+  it('plans as before tiling when Allow tiling is off', () => {
+    const model = doorModel();
+    const result = plan(model, NO_TILING, { sawCnc: { door: 'cnc' } });
+    expectInvariants(model, result, NO_TILING);
+    expect(result.sheets[0]?.sawReasons).toEqual({ door: 'oversize' });
+    expect(allBlanks(result).some((b) => b.tiled || b.length > 1300000)).toBe(false);
+  });
+
+  it('nests a tileable Part on a kept Offcut of a Locked Board as a Tiled Blank', () => {
+    const model = doorModel({}, 1);
+    model.parts = model.parts.map((p) => (p.id === 'door' ? { ...p, cutWidth: 300000 } : p));
+    const before = plan(model, DEFAULT_SETTINGS);
+    const cut = ['shelf0'];
+    const marked = remakePart(before, 'door');
+    const after = plan(model, DEFAULT_SETTINGS, { plan: marked, cut });
+
+    const door = after.sheets[0]?.boards.flatMap((b) => b.blanks).find((b) => b.parts.some((p) => p.partId === 'door' && !p.remade) && b.from);
+    expect(door?.tiled).toBe(true);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])(
+    'holds the invariants and Run order with tiling on (random export %i with CNC ops)',
+    (seed) => {
+      const model = randomModel(seed, 40);
+      model.parts = model.parts.map((p, i) => (i % 2 === 0 ? { ...p, top: [drill] } : p));
+      const result = plan(model, DEFAULT_SETTINGS);
+      expectInvariants(model, result, DEFAULT_SETTINGS);
+      expectRunOrder(model, result);
+    },
+  );
+
+  it('keeps tiling off for Locked Boards planned without it, and holds the invariants', () => {
+    const model = randomModel(3, 40);
+    model.parts = model.parts.map((p) => ({ ...p, top: [drill] }));
+    const before = plan(model, NO_TILING);
+    const cut = before.sheets.flatMap((s) => s.boards.slice(0, 1).flatMap(boardPartIds)).slice(0, 1);
+    const after = plan(model, DEFAULT_SETTINGS, { plan: before, cut });
+    expectInvariants(model, after, DEFAULT_SETTINGS);
+    expect(allBlanks(after).some((b) => b.tiled)).toBe(true);
   });
 });
 

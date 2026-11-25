@@ -13,4 +13,5 @@ export const SETTING_LABELS: Record<keyof Settings, string> = {
   minOffcutSize: 'Min Offcut size',
   manualBottomOpKinds: '`bottom` op kinds done by hand',
   fenceHeightNote: 'Fence height note',
+  allowTiling: 'Allow tiling',
 };

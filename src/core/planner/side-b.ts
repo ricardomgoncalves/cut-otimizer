@@ -83,11 +83,25 @@ function opCentre(op: CncOp): Point {
   }
 }
 
+/**
+ * The turns a Part may take on the bed. With tiling, a Part longer than the bed lies long along X (Tiles
+ * only go along X), and one that fits the bed is kept within it; without tiling, any turn.
+ */
+function allowedTurns(part: Part, settings: Settings): QuarterTurns[] {
+  if (!settings.allowTiling) return TURN_ORDER;
+  const size = (t: QuarterTurns) =>
+    t % 2 === 0 ? { x: part.cutLength, y: part.cutWidth } : { x: part.cutWidth, y: part.cutLength };
+  const inBed = TURN_ORDER.filter((t) => size(t).x <= settings.bedLength && size(t).y <= settings.bedWidth);
+  if (inBed.length > 0) return inBed;
+  const alongX = TURN_ORDER.filter((t) => size(t).y <= settings.bedWidth);
+  return alongX.length > 0 ? alongX : TURN_ORDER;
+}
+
 /** The orientation that puts the ops closest to the two fence edges (least total distance from both). */
-function bestTurns(part: Part, ops: CncOp[]): QuarterTurns {
-  let best: QuarterTurns = 0;
+function bestTurns(part: Part, ops: CncOp[], turnsAllowed: QuarterTurns[]): QuarterTurns {
+  let best = turnsAllowed[0] ?? 0;
   let bestScore = Infinity;
-  for (const turns of TURN_ORDER) {
+  for (const turns of turnsAllowed) {
     const score = ops.reduce((sum, op) => {
       const c = sideBPoint({ turns, cutLength: part.cutLength, cutWidth: part.cutWidth }, opCentre(op));
       return sum + c.x + c.y;
@@ -126,7 +140,7 @@ export function sideB(
 
     const ops = part.bottom.filter((op) => !settings.manualBottomOpKinds.includes(op.kind));
     if (ops.length === 0) continue;
-    const turns = bestTurns(part, ops);
+    const turns = bestTurns(part, ops, allowedTurns(part, settings));
     // An exact match only: nothing is turned or mirrored to make two Parts share a file.
     const key = JSON.stringify([part.cutLength, part.cutWidth, turns, ops.map((op) => JSON.stringify(op)).sort()]);
     const file = files.get(key);

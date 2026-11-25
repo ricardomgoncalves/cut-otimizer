@@ -8,6 +8,7 @@ import { STEP_LABELS } from './step-labels.ts';
 const SAW_REASONS: Record<SawReason, string> = {
   oversize: 'bigger than the bed',
   narrow: 'narrow',
+  long: 'longer than the bed',
   chosen: 'chosen',
 };
 
@@ -71,7 +72,9 @@ export function PartList({ job, sheet, progress, where, needsNesting, overflow, 
                   ) : (
                     <>
                       {at}
-                      {reason && sheet.sawParts.includes(p.id) && ` (${SAW_REASONS[reason]})`}
+                      {reason &&
+                        sheet.sawParts.includes(p.id) &&
+                        ` (${SAW_REASONS[reason]}${reason === 'oversize' && job.plan.settings.allowTiling ? ': tiling only goes along X' : ''})`}
                     </>
                   )}
                   {placed && isCut(progress, p.id) && (
@@ -90,7 +93,13 @@ export function PartList({ job, sheet, progress, where, needsNesting, overflow, 
                   {placed && narrow.has(p.id) && <span className="warn"> · narrow: check tabs</span>}
                 </td>
                 <td>
-                  <label title={reason === 'oversize' ? 'Bigger than the usable bed: always cut on the saw' : undefined}>
+                  <label
+                    title={
+                      reason === 'oversize'
+                        ? 'Bigger than the usable bed: always cut on the saw (tiling only goes along X)'
+                        : undefined
+                    }
+                  >
                     <input
                       type="checkbox"
                       checked={partMode(job, p.id) === 'saw'}

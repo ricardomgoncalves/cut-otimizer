@@ -105,6 +105,7 @@ Each group ends with where its detail lives. "I" is the maker.
    - Min Offcut size (150 mm)
    - the `bottom` op kinds always done by hand
    - the fence height note
+   - Allow tiling (on for new settings; off for a Job saved before it existed)
 
    Each Job keeps the snapshot it was last generated with, so its files stay reproducible.
 5. I can edit a Sheet code (`W18`), which is derived from material and thickness by default.
@@ -125,10 +126,10 @@ Detail: "[Part display names on labels, PDF and scan feedback](https://github.co
 ### 3. Breakdown and nesting
 
 1. I generate the plan and see each Board's Breakdown (rips and crosscuts, Blanks, Saw Parts, Offcuts) and each Blank's Layout.
-2. Blank sizes are chosen per Board, up to the bed size, and a strip may shrink to what its Layout uses. A Blank keeps its Board's grain and is never rotated: Board length always runs along the bed's X.
-3. Parts are nested inside each Blank minus the clamp margin on all four edges.
-4. A Part bigger than the usable bed is always a Saw Part. A Part narrower than Min CNC width (on its shorter cut side) with no CNC ops becomes a Saw Part automatically. A narrow Part that has CNC ops stays on the CNC, with a warning in the Part list, in the Layout view and on its PDF row.
-5. I can switch any Part between Saw and CNC, except one bigger than the bed, and regenerate.
+2. Blank sizes are chosen per Board, up to the bed size, and a strip may shrink to what its Layout uses. A Blank keeps its Board's grain and is never rotated: Board length always runs along the bed's X. The one exception is a **Tiled Blank** (with Allow tiling on): it holds at least one Part longer than the usable bed and may run past the bed along X, up to the trimmed Board length, but never past the bed width along Y. Other Parts fill the rest of it. CAM cuts it in Tiles from one Side A file; the app doesn't know where the Tiles fall and keeps nothing clear at their edges ([ADR 0001](adr/0001-tiling-along-x-cam-owns-tiles.md)).
+3. Parts are nested inside each Blank minus the clamp margin on all four edges (a Tiled Blank's outer edges only).
+4. A Part bigger than the usable bed is a Saw Part, unless Allow tiling is on and it fits the usable bed width and the trimmed Board length minus the clamp margins: then it is tileable, goes on a Tiled Blank when it has CNC ops and is a Saw Part ("longer than the bed") when it has none. A Part too wide for the bed, or too long for the Board, is always a Saw Part (tiling only goes along X). A Part narrower than Min CNC width (on its shorter cut side) with no CNC ops becomes a Saw Part automatically. A narrow Part that has CNC ops stays on the CNC, with a warning in the Part list, in the Layout view and on its PDF row.
+5. I can switch any Part between Saw and CNC, except one bigger than the bed that can't be tiled, and regenerate.
 6. Blank ids are `<Sheet code>-<Board>-<letter>` (`W18-1-A`), lettered in the order pieces come off the saw.
 7. Once any Part on a Board or Blank is ticked Cut, it is **Locked**. Regenerating never changes a Locked Board or Blank. It re-nests only what needs nesting, and Locked Blanks keep their ids forever.
 
