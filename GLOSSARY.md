@@ -61,11 +61,11 @@ A piece cut from a Board, no larger than the bed (except a Tiled Blank), onto wh
 _Avoid_: sub-sheet, offcut
 
 **Tiled Blank**:
-A Blank longer than the bed along X, but never wider than it along Y. It exists only to hold at least one Part bigger than the bed. Other Parts fill the rest of it. CAM cuts it in several Tiles from one file. Only made when Allow tiling is on.
+A Blank longer than the bed along X (at most its Board's trimmed length), but never wider than it along Y. It exists only to hold at least one Part bigger than the bed. Other Parts fill the rest of it. CAM cuts it in several Tiles from one file, and the clamp margin applies only to its outer edges. Only made when Allow tiling is on.
 _Avoid_: long Blank, oversize Blank
 
 **Tile**:
-One pass of the bed over a Tiled Blank, between which the workpiece slides along X. CAM decides where the Tiles fall.
+One pass of the bed over a Tiled Blank, between which the workpiece slides along X. CAM decides where the Tiles fall. The app does not know where they fall and keeps nothing clear at their edges. A Flip Part longer than the bed is cut in Tiles on Side B too.
 _Avoid_: section, segment
 
 **Run order**:
