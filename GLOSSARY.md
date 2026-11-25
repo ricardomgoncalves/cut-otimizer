@@ -57,8 +57,16 @@ The saw plan that cuts each Board, by guillotine cuts, into Blanks, Saw Parts an
 _Avoid_: pre-cut plan, rip plan
 
 **Blank**:
-A piece cut from a Board, no larger than the bed, onto which Parts are nested. Always loaded with its Board's length along the bed's X. Identified as Sheet code, Board number, letter (`W18-1-A`), with letters given in the order pieces come off the saw.
-_Avoid_: sub-sheet, tile, offcut
+A piece cut from a Board, no larger than the bed (except a Tiled Blank), onto which Parts are nested. Always loaded with its Board's length along the bed's X. Identified as Sheet code, Board number, letter (`W18-1-A`), with letters given in the order pieces come off the saw.
+_Avoid_: sub-sheet, offcut
+
+**Tiled Blank**:
+A Blank longer than the bed along X, but never wider than it along Y. It exists only to hold at least one Part bigger than the bed. Other Parts fill the rest of it. CAM cuts it in several Tiles from one file. Only made when Allow tiling is on.
+_Avoid_: long Blank, oversize Blank
+
+**Tile**:
+One pass of the bed over a Tiled Blank, between which the workpiece slides along X. CAM decides where the Tiles fall.
+_Avoid_: section, segment
 
 **Run order**:
 The single Job-wide sequence in which the work is done: all Boards are sawn, then all Blanks run Side A, then all Side B files, then banding. Sheets are grouped by thickness (groups and Sheets in export order), Boards and Blanks follow their ids, and Parts within a Blank are numbered by position. It is always computed, never edited, and the cut sheet and labels follow it.
@@ -68,7 +76,7 @@ _Avoid_: work order, order of work, cut order
 A short code for a Sheet, derived from its material and thickness and editable (`W18` for White melamine 18). Used in Blank ids.
 
 **Saw Part**:
-A Part cut straight from a Board in the Breakdown rather than on the CNC. A Part bigger than the usable bed is always a Saw Part. A Part narrower than Min CNC width with no CNC ops becomes one automatically; any other Part can be switched between Saw and CNC by hand.
+A Part cut straight from a Board in the Breakdown rather than on the CNC. A Part bigger than the usable bed is a Saw Part unless it has CNC ops and Allow tiling is on, in which case it goes on a Tiled Blank. A Part narrower than Min CNC width with no CNC ops becomes one automatically; any other Part can be switched between Saw and CNC by hand.
 _Avoid_: manual part
 
 **Offcut**:
@@ -96,7 +104,7 @@ The square stop fixed to the bed that a Flip Part is pushed into for Side B. It 
 _Avoid_: jig, registration
 
 **Machine settings**:
-Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf, edge trim, Min CNC width (the shortest cut side a Part may have to be nested without a warning) and Min Offcut size (the smallest Offcut, on both sides, that is kept as stock). A Job keeps a snapshot of them from when its Layouts were generated.
+Global settings that describe the CNC and saw, such as bed size, clamp margin, bit diameter, saw kerf, edge trim, Min CNC width (the shortest cut side a Part may have to be nested without a warning) Min Offcut size (the smallest Offcut, on both sides, that is kept as stock) and Allow tiling (whether CAM may cut a Tiled Blank). A Job keeps a snapshot of them from when its Layouts were generated.
 _Avoid_: profile, config
 
 **Locked**:
