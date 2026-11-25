@@ -5,7 +5,7 @@ import { partNamer, type Model, type Part, type PartEdge } from '../model.ts';
 import { isLive, livePartIds } from '../plan-queries.ts';
 import type { Blank, Placement, Plan, SawPlacement, SheetPlan } from '../planner/index.ts';
 import { steps, type ReprintSelection, type Step } from '../progress.ts';
-import { sizeText } from './format.ts';
+import { mmText, sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, GREY, MARGIN, text, type Cell, type Column } from './layout.ts';
 import { A4, type Page } from './page.ts';
 
@@ -37,6 +37,13 @@ export function printsPart(job: CutSheetJob, partId: string): boolean {
 }
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;
+
+/**
+ * The header note on a page for something longer than the bed, which CAM cuts in Tiles (a Tiled Blank, or
+ * a tiled Flip Part's Side B). The app doesn't know where the Tiles fall, so it draws no seams.
+ */
+export const tiledNote = (what: 'Blank' | 'Part', length: number, bedLength: number) =>
+  `Tiled ${what}, ${mmText(length)} mm long, longer than the bed (${mmText(bedLength)} mm): cut in Tiles`;
 
 export function partName(job: CutSheetJob): (partId: string) => string {
   return partNamer(job.model);

@@ -30,6 +30,12 @@ export interface Settings {
   manualBottomOpKinds: OpKind[];
   /** Free text, shown with Side B files. */
   fenceHeightNote: string;
+  /**
+   * Whether CAM may cut a Tiled Blank: a Blank longer than the bed along X, cut in several Tiles from one
+   * file. On, a Part longer than the usable bed (but not wider) can go on the CNC. A stored copy without it
+   * reads as off, so Jobs from before it plan as they did.
+   */
+  allowTiling: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -44,6 +50,7 @@ export const DEFAULT_SETTINGS: Settings = {
   minOffcutSize: 150000,
   manualBottomOpKinds: [],
   fenceHeightNote: '',
+  allowTiling: true,
 };
 
 type LengthKey = {
@@ -65,7 +72,8 @@ const isLength = (v: unknown): v is number => typeof v === 'number' && Number.is
 
 /**
  * Reads stored settings (e.g. from browser storage or a Job file). Each field that is missing or
- * malformed falls back to its default, so older or hand-edited settings always load.
+ * malformed falls back to its default, so older or hand-edited settings always load. Allow tiling is the
+ * exception: missing or malformed reads as off, so an older copy plans as it did.
  */
 export function parseSettings(value: unknown): Settings {
   const raw: Partial<Record<keyof Settings, unknown>> =
@@ -82,6 +90,8 @@ export function parseSettings(value: unknown): Settings {
   const kinds = raw.manualBottomOpKinds;
   if (Array.isArray(kinds)) settings.manualBottomOpKinds = OP_KINDS.filter((k) => kinds.includes(k));
   if (typeof raw.fenceHeightNote === 'string') settings.fenceHeightNote = raw.fenceHeightNote;
+  // Missing means a copy from before tiling: it stays off, so that Job plans as it did.
+  settings.allowTiling = raw.allowTiling === true;
   return settings;
 }
 

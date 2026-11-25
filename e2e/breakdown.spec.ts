@@ -41,10 +41,11 @@ test('the narrow op-less Part is a Saw Part, and toggling it to CNC nests it wit
   await expect(rail).toContainText('W18-1 saw (narrow)');
   await expect(rail).toContainText('narrow');
 
-  // The 2100 mm side can't go to the CNC.
-  await expect(
-    parts.getByRole('row', { name: /T1 · Left side/ }).getByRole('checkbox', { name: 'Saw' }),
-  ).toBeDisabled();
+  // The op-less 2100 mm side is longer than the bed: a Saw Part by default, but with tiling on (the
+  // default) it may go to the CNC on a Tiled Blank (e2e/tiling.spec.ts covers it with tiling off).
+  const side = parts.getByRole('row', { name: /T1 · Left side/ });
+  await expect(side).toContainText('longer than the bed');
+  await expect(side.getByRole('checkbox', { name: 'Saw' })).toBeEnabled();
 
   await rail.getByRole('checkbox', { name: 'Saw' }).uncheck();
 

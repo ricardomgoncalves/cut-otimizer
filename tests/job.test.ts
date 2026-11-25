@@ -178,9 +178,30 @@ describe('Saw / CNC toggle', () => {
   });
 
   it('is not available for a Part bigger than the bed', () => {
-    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    const job = generateJob(syntheticModel(), { ...DEFAULT_SETTINGS, allowTiling: false });
     expect(setPartMode(job, 'c1/leftSide', 'cnc')).toEqual({
       error: 'This Part is bigger than the usable bed, so it is always cut on the saw.',
+    });
+  });
+
+  it('with tiling on, sends a Part longer than the bed to the CNC, on a Tiled Blank', () => {
+    const job = generateJob(syntheticModel(), DEFAULT_SETTINGS);
+    expect(partMode(job, 'c1/leftSide')).toBe('saw');
+    const cnc = setPartMode(job, 'c1/leftSide', 'cnc');
+    if ('error' in cnc) throw new Error(cnc.error);
+    expect(cnc.job.sawCnc).toEqual({ 'c1/leftSide': 'cnc' });
+    const tiled = regenerate(cnc.job, DEFAULT_SETTINGS).plan.sheets[0]?.boards[0]?.blanks.find((b) =>
+      b.parts.some((p) => p.partId === 'c1/leftSide'),
+    );
+    expect(tiled?.tiled).toBe(true);
+  });
+
+  it('with tiling on, says tiling only goes along X for a Part too wide for the bed', () => {
+    const model = syntheticModel();
+    model.parts = model.parts.map((p) => (p.id === 'c1/leftSide' ? { ...p, cutWidth: 1400000 } : p));
+    expect(setPartMode(generateJob(model, DEFAULT_SETTINGS), 'c1/leftSide', 'cnc')).toEqual({
+      error:
+        'This Part is bigger than the usable bed, so it is always cut on the saw. Tiling only goes along X: it must fit the bed’s width.',
     });
   });
 });

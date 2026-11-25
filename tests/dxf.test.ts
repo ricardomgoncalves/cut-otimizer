@@ -122,7 +122,105 @@ const sideBFile: SideBFile = {
   partIds: ['p1'],
 };
 
+/**
+ * A hand-written Tiled Blank: 2386 × 380 mm, longer than the 1300 mm bed, holding a 2000 × 300 mm door
+ * with two hinge cups and a 300 × 200 mm shelf beside it (the bit gap between them). Its one Side A file
+ * covers the whole Blank, in the same layers as any other: nothing about Tiles is written.
+ */
+const tiledPlan: Plan = {
+  ...handPlan,
+  sheets: [
+    {
+      sheetId: 's1',
+      code: 'W18',
+      thickness: mm(18),
+      sawParts: [],
+      sawReasons: {},
+      unplaced: [],
+      boards: [
+        {
+          number: 1,
+          length: mm(2800),
+          width: mm(2070),
+          sawParts: [],
+          offcuts: [],
+          cuts: [],
+          blanks: [
+            {
+              id: 'W18-1-A',
+              letter: 'A',
+              x: 0,
+              y: 0,
+              length: mm(2386),
+              width: mm(380),
+              clampMargin: mm(40),
+              tiled: true,
+              parts: [
+                {
+                  n: 1,
+                  partId: 'door',
+                  x: mm(40),
+                  y: mm(40),
+                  rotated: false,
+                  cutLength: mm(2000),
+                  cutWidth: mm(300),
+                  narrow: false,
+                  ops: [
+                    { kind: 'drill', at: { x: mm(100), y: mm(22.5) }, diameter: mm(35), depth: mm(13) },
+                    { kind: 'drill', at: { x: mm(1900), y: mm(22.5) }, diameter: mm(35), depth: mm(13) },
+                  ],
+                },
+                {
+                  n: 2,
+                  partId: 'shelf',
+                  x: mm(2046),
+                  y: mm(40),
+                  rotated: false,
+                  cutLength: mm(300),
+                  cutWidth: mm(200),
+                  narrow: false,
+                  ops: [{ kind: 'drill', at: { x: mm(32), y: mm(32) }, diameter: mm(5), depth: 'through' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+/** A tiled Flip Part's Side B file: the whole 2000 × 600 mm door, long along X, Fence corner as origin. */
+const tiledSideB: SideBFile = {
+  id: 'B1',
+  turns: 0,
+  longFence: 'yW',
+  shortFence: 'x0',
+  cutLength: mm(2000),
+  cutWidth: mm(600),
+  length: mm(2000),
+  width: mm(600),
+  ops: [
+    { kind: 'drill', at: { x: mm(100), y: mm(577.5) }, diameter: mm(35), depth: mm(13) },
+    { kind: 'drill', at: { x: mm(1900), y: mm(577.5) }, diameter: mm(35), depth: mm(13) },
+  ],
+  partIds: ['door'],
+};
+
 describe('toDxfFiles', () => {
+  it('writes one Side A file for a whole Tiled Blank, matching the golden', async () => {
+    const files = toDxfFiles(tiledPlan, 'J7');
+
+    expect([...files.keys()]).toEqual(['W18-1-A.side-a.dxf']);
+    await expect(files.get('W18-1-A.side-a.dxf')).toMatchFileSnapshot('golden/W18-1-A.tiled.side-a.dxf');
+  });
+
+  it('writes one Side B file for a whole tiled Flip Part, matching the golden', async () => {
+    const files = toDxfFiles({ ...tiledPlan, sideB: [tiledSideB] }, 'J7');
+
+    await expect(files.get('J7-B1.side-b.dxf')).toMatchFileSnapshot('golden/J7-B1.tiled.side-b.dxf');
+  });
+
   it('writes one Side A file per Blank, matching the golden R12 output', () => {
     const files = toDxfFiles(handPlan, 'J7');
     const golden = readFileSync(new URL('golden/W18-1-A.side-a.dxf', import.meta.url), 'utf8');

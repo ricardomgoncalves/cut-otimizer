@@ -8,7 +8,7 @@ import { opItems } from './drawing.ts';
 import { mmText, sizeText } from './format.ts';
 import { CONTENT_WIDTH, FONT, Flow, GREY, MARGIN, SHADE, table, text, type Cell } from './layout.ts';
 import { BLACK, type Item, type Page } from './page.ts';
-import { partLocations, plural, sectionNumber, workHeader, type CutSheetJob } from './work.ts';
+import { partLocations, plural, sectionNumber, tiledNote, workHeader, type CutSheetJob } from './work.ts';
 
 const GAP = 6;
 const CARD_WIDTH = (CONTENT_WIDTH - GAP) / 2;
@@ -17,6 +17,8 @@ const DRAWING_MAX_WIDTH = CARD_WIDTH - DRAWING_LEFT - 6;
 const DRAWING_MAX_HEIGHT = 38;
 /** From the card's top to the top of the drawing. */
 const DRAWING_TOP = 18;
+/** The extra line a tiled Flip Part's card gets for its note. */
+const TILED_LINE = 3.6;
 const ROW = 4.8;
 
 export function sideBPages(plan: Plan, job: CutSheetJob): Page[] {
@@ -29,7 +31,7 @@ export function sideBPages(plan: Plan, job: CutSheetJob): Page[] {
 
   for (let i = 0; i < files.length; i += 2) {
     const row = files.slice(i, i + 2);
-    const height = Math.max(...row.map(cardHeight));
+    const height = Math.max(...row.map((f) => cardHeight(plan, f)));
     flow.ensure(height + 3);
     flow.y += 3;
     const top = flow.y;
@@ -44,8 +46,13 @@ export function sideBPages(plan: Plan, job: CutSheetJob): Page[] {
 
 const drawingScale = (file: SideBFile) => Math.min(DRAWING_MAX_WIDTH / file.length, DRAWING_MAX_HEIGHT / file.width);
 
-function cardHeight(file: SideBFile): number {
-  return DRAWING_TOP + file.width * drawingScale(file) + 9 + (file.partIds.length + 1) * ROW + 3;
+/** A Flip Part longer than the bed, cut in Tiles (only with Allow tiling). */
+const tiled = (plan: Plan, file: SideBFile) => plan.settings.allowTiling && file.length > plan.settings.bedLength;
+
+const drawingTop = (plan: Plan, file: SideBFile) => DRAWING_TOP + (tiled(plan, file) ? TILED_LINE : 0);
+
+function cardHeight(plan: Plan, file: SideBFile): number {
+  return drawingTop(plan, file) + file.width * drawingScale(file) + 9 + (file.partIds.length + 1) * ROW + 3;
 }
 
 function card(
@@ -86,6 +93,9 @@ function card(
       FONT.small,
       { bold: true, max: CARD_WIDTH - 4 },
     ),
+    ...(tiled(plan, file)
+      ? [text(x + 2, top + 16.2, tiledNote('Part', file.length, plan.settings.bedLength), FONT.small, { bold: true, max: CARD_WIDTH - 4 })]
+      : []),
   ];
 
   // Bottom view: the Fence corner at the bottom left, long fence along X, short fence along Y.
@@ -93,7 +103,7 @@ function card(
   const w = file.length * s;
   const h = file.width * s;
   const left = x + DRAWING_LEFT;
-  const dTop = top + DRAWING_TOP;
+  const dTop = top + drawingTop(plan, file);
   const bottom = dTop + h;
   const toPage = (p: Point): [number, number] => {
     const q = sideBPoint(file, p);
